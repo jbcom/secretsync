@@ -188,16 +188,23 @@ type Target struct {
 }
 
 // DynamicTarget defines targets discovered at runtime
+// It supports all the same options as static targets, plus discovery configuration
 type DynamicTarget struct {
 	Discovery DiscoveryConfig `mapstructure:"discovery" yaml:"discovery"`
 	Imports   []string        `mapstructure:"imports" yaml:"imports"`
 	Exclude   []string        `mapstructure:"exclude" yaml:"exclude"`
+	
+	// All static target options are also available for dynamic targets
+	Region       string `mapstructure:"region" yaml:"region"`
+	SecretPrefix string `mapstructure:"secret_prefix" yaml:"secret_prefix"`
+	RoleARN      string `mapstructure:"role_arn" yaml:"role_arn"` // Supports {{.AccountID}} template
 }
 
 // DiscoveryConfig defines how to discover dynamic targets
 type DiscoveryConfig struct {
 	IdentityCenter *IdentityCenterDiscovery `mapstructure:"identity_center" yaml:"identity_center"`
 	Organizations  *OrganizationsDiscovery  `mapstructure:"organizations" yaml:"organizations"`
+	AccountsList   *AccountsListDiscovery   `mapstructure:"accounts_list" yaml:"accounts_list"`
 }
 
 // IdentityCenterDiscovery discovers accounts from Identity Center
@@ -208,8 +215,14 @@ type IdentityCenterDiscovery struct {
 
 // OrganizationsDiscovery discovers accounts from AWS Organizations
 type OrganizationsDiscovery struct {
-	OU   string            `mapstructure:"ou" yaml:"ou"`
-	Tags map[string]string `mapstructure:"tags" yaml:"tags"`
+	OU        string            `mapstructure:"ou" yaml:"ou"`
+	Tags      map[string]string `mapstructure:"tags" yaml:"tags"`
+	Recursive bool              `mapstructure:"recursive" yaml:"recursive"` // Whether to traverse child OUs
+}
+
+// AccountsListDiscovery discovers accounts from an external source (e.g., SSM Parameter Store)
+type AccountsListDiscovery struct {
+	Source string `mapstructure:"source" yaml:"source"` // e.g., "ssm:/platform/analytics-engineer-sandboxes"
 }
 
 // PipelineSettings configures pipeline execution
@@ -353,8 +366,8 @@ func (c *Config) Validate() error {
 
 	// Validate dynamic targets
 	for name, dt := range c.DynamicTargets {
-		if dt.Discovery.IdentityCenter == nil && dt.Discovery.Organizations == nil {
-			return fmt.Errorf("dynamic_target %q: must specify identity_center or organizations discovery", name)
+		if dt.Discovery.IdentityCenter == nil && dt.Discovery.Organizations == nil && dt.Discovery.AccountsList == nil {
+			return fmt.Errorf("dynamic_target %q: must specify identity_center, organizations, or accounts_list discovery", name)
 		}
 	}
 

@@ -13,7 +13,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.2
 	github.com/aws/aws-sdk-go-v2/service/identitystore v1.34.5
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.49.2
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.79.3
 	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.40.2
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.58.2
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.17
 	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.36.10
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.2

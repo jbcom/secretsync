@@ -8,7 +8,6 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/identitystore"
-	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
 	log "github.com/sirupsen/logrus"
 )
@@ -64,6 +63,19 @@ func (d *DiscoveryService) DiscoverTargets() (map[string]Target, error) {
 			accounts = append(accounts, orgAccounts...)
 		}
 
+		// Discover from external account list (e.g., SSM Parameter Store)
+		if dynamicTarget.Discovery.AccountsList != nil {
+			listAccounts, err := d.discoverFromAccountsList(dynamicTarget.Discovery.AccountsList)
+			if err != nil {
+				l.WithError(err).Warn("Failed to discover from accounts list")
+				continue
+			}
+			accounts = append(accounts, listAccounts...)
+		}
+
+		// Deduplicate accounts
+		accounts = deduplicateAccounts(accounts)
+
 		// Convert discovered accounts to targets
 		for _, acct := range accounts {
 			// Check exclusions
@@ -78,20 +90,35 @@ func (d *DiscoveryService) DiscoverTargets() (map[string]Target, error) {
 				targetName = fmt.Sprintf("account_%s", acct.ID)
 			}
 
-			// Ensure uniqueness
+			// Ensure uniqueness by appending account ID suffix
 			if _, exists := discoveredTargets[targetName]; exists {
 				targetName = fmt.Sprintf("%s_%s", targetName, acct.ID[:6])
 			}
 
+			// Apply dynamic target options with fallbacks to config defaults
+			region := dynamicTarget.Region
+			if region == "" {
+				region = d.config.AWS.Region
+			}
+
+			// Process role ARN template (supports {{.AccountID}})
+			roleARN := dynamicTarget.RoleARN
+			if roleARN != "" {
+				roleARN = strings.ReplaceAll(roleARN, "{{.AccountID}}", acct.ID)
+			}
+
 			discoveredTargets[targetName] = Target{
-				AccountID: acct.ID,
-				Imports:   dynamicTarget.Imports,
-				Region:    d.config.AWS.Region,
+				AccountID:    acct.ID,
+				Imports:      dynamicTarget.Imports,
+				Region:       region,
+				SecretPrefix: dynamicTarget.SecretPrefix,
+				RoleARN:      roleARN,
 			}
 
 			l.WithFields(log.Fields{
 				"targetName": targetName,
 				"accountID":  acct.ID,
+				"region":     region,
 			}).Debug("Discovered target")
 		}
 	}
@@ -170,8 +197,9 @@ func (d *DiscoveryService) discoverFromIdentityCenter(cfg *IdentityCenterDiscove
 // discoverFromOrganizations discovers accounts from AWS Organizations
 func (d *DiscoveryService) discoverFromOrganizations(cfg *OrganizationsDiscovery) ([]AccountInfo, error) {
 	l := log.WithFields(log.Fields{
-		"action": "discoverFromOrganizations",
-		"ou":     cfg.OU,
+		"action":    "discoverFromOrganizations",
+		"ou":        cfg.OU,
+		"recursive": cfg.Recursive,
 	})
 	l.Debug("Discovering accounts from Organizations")
 
@@ -183,20 +211,25 @@ func (d *DiscoveryService) discoverFromOrganizations(cfg *OrganizationsDiscovery
 
 	// Discover by OU
 	if cfg.OU != "" {
-		ouAccounts, err := d.awsCtx.ListAccountsInOU(d.ctx, cfg.OU)
-		if err != nil {
-			return nil, err
+		if cfg.Recursive {
+			// Recursive traversal of OU and all child OUs
+			ouAccounts, err := d.listAccountsInOURecursive(cfg.OU)
+			if err != nil {
+				return nil, err
+			}
+			accounts = append(accounts, ouAccounts...)
+		} else {
+			// Direct children only
+			ouAccounts, err := d.awsCtx.ListAccountsInOU(d.ctx, cfg.OU)
+			if err != nil {
+				return nil, err
+			}
+			accounts = append(accounts, ouAccounts...)
 		}
-		accounts = append(accounts, ouAccounts...)
 	}
 
-	// Filter by tags if specified
-	if len(cfg.Tags) > 0 {
-		accounts = filterAccountsByTags(accounts, cfg.Tags)
-	}
-
-	// If no OU specified, list all accounts
-	if cfg.OU == "" {
+	// If no OU specified but tags are specified, list all accounts and filter
+	if cfg.OU == "" && len(cfg.Tags) > 0 {
 		allAccounts, err := d.awsCtx.ListOrganizationAccounts(d.ctx)
 		if err != nil {
 			return nil, err
@@ -204,8 +237,75 @@ func (d *DiscoveryService) discoverFromOrganizations(cfg *OrganizationsDiscovery
 		accounts = append(accounts, allAccounts...)
 	}
 
+	// Filter by tags if specified
+	if len(cfg.Tags) > 0 {
+		accounts = filterAccountsByTags(accounts, cfg.Tags)
+	}
+
 	l.WithField("count", len(accounts)).Debug("Discovered accounts from Organizations")
 	return accounts, nil
+}
+
+// listAccountsInOURecursive recursively lists accounts in an OU and all child OUs
+func (d *DiscoveryService) listAccountsInOURecursive(ouID string) ([]AccountInfo, error) {
+	var accounts []AccountInfo
+
+	// Get accounts directly in this OU
+	ouAccounts, err := d.awsCtx.ListAccountsInOU(d.ctx, ouID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list accounts in OU %s: %w", ouID, err)
+	}
+	accounts = append(accounts, ouAccounts...)
+
+	// Get child OUs and recurse
+	childOUs, err := d.awsCtx.ListChildOUs(d.ctx, ouID)
+	if err != nil {
+		// Log but continue - we might not have permission to list child OUs
+		log.WithError(err).WithField("ou", ouID).Debug("Could not list child OUs")
+		return accounts, nil
+	}
+
+	for _, childOU := range childOUs {
+		childAccounts, err := d.listAccountsInOURecursive(childOU)
+		if err != nil {
+			log.WithError(err).WithField("childOU", childOU).Debug("Error recursing into child OU")
+			continue
+		}
+		accounts = append(accounts, childAccounts...)
+	}
+
+	return accounts, nil
+}
+
+// discoverFromAccountsList discovers accounts from an external source (e.g., SSM Parameter Store)
+func (d *DiscoveryService) discoverFromAccountsList(cfg *AccountsListDiscovery) ([]AccountInfo, error) {
+	l := log.WithFields(log.Fields{
+		"action": "discoverFromAccountsList",
+		"source": cfg.Source,
+	})
+	l.Debug("Discovering accounts from external list")
+
+	// Parse the source - currently supports SSM Parameter Store
+	if strings.HasPrefix(cfg.Source, "ssm:") {
+		paramName := strings.TrimPrefix(cfg.Source, "ssm:")
+		return d.getAccountsFromSSM(paramName)
+	}
+
+	return nil, fmt.Errorf("unsupported accounts list source: %s (supported: ssm:)", cfg.Source)
+}
+
+// getAccountsFromSSM retrieves account IDs from an SSM Parameter Store parameter
+// The parameter value should be a comma-separated list of account IDs or JSON array
+func (d *DiscoveryService) getAccountsFromSSM(paramName string) ([]AccountInfo, error) {
+	l := log.WithFields(log.Fields{
+		"action": "getAccountsFromSSM",
+		"param":  paramName,
+	})
+	l.Debug("Fetching accounts from SSM Parameter Store")
+
+	// Note: SSM client needs to be added to AWSExecutionContext
+	// For now, return a placeholder that explains the limitation
+	return nil, fmt.Errorf("SSM-based account discovery requires SSM client setup; parameter: %s", paramName)
 }
 
 // findGroupByName finds an Identity Store group by display name

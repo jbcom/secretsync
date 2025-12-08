@@ -436,6 +436,31 @@ func (ec *AWSExecutionContext) ListAccountsInOU(ctx context.Context, ouID string
 	return accounts, nil
 }
 
+// ListChildOUs returns child Organizational Units for a given parent OU
+func (ec *AWSExecutionContext) ListChildOUs(ctx context.Context, parentID string) ([]string, error) {
+	if !ec.CanAccessOrganizations() {
+		return nil, fmt.Errorf("no access to Organizations API from this execution context")
+	}
+
+	var childOUs []string
+	paginator := organizations.NewListOrganizationalUnitsForParentPaginator(ec.orgClient, &organizations.ListOrganizationalUnitsForParentInput{
+		ParentId: aws.String(parentID),
+	})
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list child OUs for %s: %w", parentID, err)
+		}
+
+		for _, ou := range output.OrganizationalUnits {
+			childOUs = append(childOUs, aws.ToString(ou.Id))
+		}
+	}
+
+	return childOUs, nil
+}
+
 // AccountInfo contains basic AWS account information
 type AccountInfo struct {
 	ID     string

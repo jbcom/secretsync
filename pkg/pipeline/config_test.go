@@ -265,7 +265,26 @@ func TestConfigValidate(t *testing.T) {
 				},
 			},
 			wantErr: true,
-			errMsg:  "must specify identity_center or organizations discovery",
+			errMsg:  "must specify identity_center, organizations, or accounts_list discovery",
+		},
+		{
+			name: "dynamic target with accounts_list",
+			config: Config{
+				Vault: VaultConfig{Address: "https://vault.example.com"},
+				Sources: map[string]Source{
+					"analytics": {Vault: &VaultSource{Mount: "analytics"}},
+				},
+				MergeStore: MergeStoreConfig{Vault: &MergeStoreVault{Mount: "merged"}},
+				DynamicTargets: map[string]DynamicTarget{
+					"sandboxes": {
+						Discovery: DiscoveryConfig{
+							AccountsList: &AccountsListDiscovery{Source: "ssm:/platform/sandboxes"},
+						},
+						Imports: []string{"analytics"},
+					},
+				},
+			},
+			wantErr: false,
 		},
 	}
 

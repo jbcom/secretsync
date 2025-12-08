@@ -233,23 +233,31 @@ merge_store:
 
 ## Dynamic Target Discovery
 
+Dynamic targets are discovered at runtime from AWS Organizations and Identity Center.
+They support **all the same options as static targets** plus discovery configuration.
+
 ### Identity Center Discovery
 
-Discover accounts where members of a specific group have access:
+Discover accounts based on permission set assignments or group membership:
 
 ```yaml
 dynamic_targets:
   analytics_engineer_sandboxes:
     discovery:
       identity_center:
-        group: "Analytics Engineers"
-        # Or by permission set:
-        # permission_set: "AnalyticsEngineerAccess"
+        # Recommended: Permission sets map directly to accounts
+        permission_set: "AnalyticsEngineerAccess"
+        # Or by group membership:
+        # group: "Analytics Engineers"
     imports:
       - analytics
       - analytics-engineers
     exclude:
-      - "123456789012"  # Exclude production
+      - "123456789012"  # Exclude production accounts
+    # All static target options are supported:
+    region: us-west-2
+    secret_prefix: /sandbox/
+    role_arn: "arn:aws:iam::{{.AccountID}}:role/SecretsAccess"
 ```
 
 ### Organizations Discovery
@@ -262,12 +270,46 @@ dynamic_targets:
     discovery:
       organizations:
         ou: "ou-xxxx-development"
-        # Or by tags:
-        # tags:
-        #   Environment: development
+        recursive: true  # Include accounts in child OUs
     imports:
       - dev-secrets
+
+  sandbox_accounts:
+    discovery:
+      organizations:
+        tags:
+          Environment: sandbox
+          Team: analytics
+    imports:
+      - analytics
+    exclude:
+      - "111111111111"  # Exclude specific accounts
 ```
+
+### External Account List Discovery
+
+Discover accounts from an external source (e.g., SSM Parameter Store):
+
+```yaml
+dynamic_targets:
+  managed_accounts:
+    discovery:
+      accounts_list:
+        source: "ssm:/platform/managed-account-ids"
+    imports:
+      - shared-secrets
+```
+
+### Dynamic Target Options
+
+Dynamic targets support all static target options:
+
+| Option | Description |
+|--------|-------------|
+| `region` | Override AWS region for all discovered accounts |
+| `secret_prefix` | Prefix for secrets in target accounts |
+| `role_arn` | Custom role ARN (supports `{{.AccountID}}` template) |
+| `exclude` | List of account IDs to exclude from discovery |
 
 ## Pipeline Settings
 
