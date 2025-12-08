@@ -70,12 +70,23 @@ What actually happens
 
 ## 🔒 Security Issues
 
-**DO NOT** open public issues for security vulnerabilities.
+**IMPORTANT**: For security vulnerabilities, please report privately.
 
-Instead:
-- Email security concerns to: [Contact via GitHub](https://github.com/jbcom)
-- See [SECURITY.md](./SECURITY.md) for our security policy
-- We aim to respond to security reports within 48 hours
+### How to Report Security Issues
+
+1. **GitHub Security Advisories** (Recommended)
+   - Go to: https://github.com/jbcom/secretsync/security/advisories
+   - Click "Report a vulnerability"
+   - Provide details privately
+
+2. **Email** (Alternative)
+   - Contact: security@jbcom.dev (if available) or create a private security advisory
+
+3. **Response Time**
+   - We aim to respond within 48 hours
+   - Critical issues are prioritized
+
+**DO NOT** open public issues for security vulnerabilities.
 
 ## 📧 Direct Contact
 

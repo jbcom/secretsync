@@ -4,17 +4,17 @@
 
 set -e
 
-# Start building the command
+# Start building the command with base
 CMD="vss pipeline"
 
 # Add config (always required)
 if [ -n "$INPUT_CONFIG" ]; then
-    CMD="$CMD --config $INPUT_CONFIG"
+    CMD="$CMD --config \"$INPUT_CONFIG\""
 fi
 
 # Add optional targets
 if [ -n "$INPUT_TARGETS" ]; then
-    CMD="$CMD --targets $INPUT_TARGETS"
+    CMD="$CMD --targets \"$INPUT_TARGETS\""
 fi
 
 # Add boolean flags
@@ -36,7 +36,7 @@ fi
 
 # Add output format (always present)
 if [ -n "$INPUT_OUTPUT_FORMAT" ]; then
-    CMD="$CMD --output $INPUT_OUTPUT_FORMAT"
+    CMD="$CMD --output \"$INPUT_OUTPUT_FORMAT\""
 fi
 
 # Add diff flag
@@ -51,12 +51,12 @@ fi
 
 # Add log level (always present)
 if [ -n "$INPUT_LOG_LEVEL" ]; then
-    CMD="$CMD --log-level $INPUT_LOG_LEVEL"
+    CMD="$CMD --log-level \"$INPUT_LOG_LEVEL\""
 fi
 
 # Add log format (always present)
 if [ -n "$INPUT_LOG_FORMAT" ]; then
-    CMD="$CMD --log-format $INPUT_LOG_FORMAT"
+    CMD="$CMD --log-format \"$INPUT_LOG_FORMAT\""
 fi
 
 # Debug: Print the command if log level is debug
@@ -64,6 +64,5 @@ if [ "$INPUT_LOG_LEVEL" = "debug" ]; then
     echo "Executing: $CMD"
 fi
 
-# Execute the command
-# shellcheck disable=SC2086
-exec $CMD
+# Execute the command using eval to properly handle quoted arguments
+eval exec "$CMD"
