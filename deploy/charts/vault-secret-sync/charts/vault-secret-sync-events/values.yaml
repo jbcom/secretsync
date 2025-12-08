@@ -92,7 +92,7 @@ config: {}
 #     body: "This is the notification body."
 #   slack:
 #     enabled: true
-#     url: "https://hooks.slack.com/services/YOUR_WORKSPACE/YOUR_CHANNEL/YOUR_TOKEN"
+#     url: "https://hooks.slack.example.com/services/xxx/xxx/xxx"
 #     message: "This is the notification message."
 #   webhook:
 #     enabled: true
