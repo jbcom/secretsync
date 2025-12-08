@@ -85,7 +85,7 @@ func (b *FileBackend) loadConfigs() error {
 	// Check if directory exists
 	if _, err := os.Stat(b.ConfigDir); os.IsNotExist(err) {
 		l.Debug("config directory does not exist, creating")
-		if err := os.MkdirAll(b.ConfigDir, 0755); err != nil {
+		if err := os.MkdirAll(b.ConfigDir, 0700); err != nil {
 			return fmt.Errorf("failed to create config directory: %w", err)
 		}
 		return nil

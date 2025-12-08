@@ -305,7 +305,8 @@ func (c *Config) applyDefaults() {
 
 // expandEnvVars expands ${VAR} patterns in config values
 func (c *Config) expandEnvVars() {
-	envPattern := regexp.MustCompile(`\$\{([^}]+)\}`)
+	// Use stricter regex to only allow valid environment variable names
+	envPattern := regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 	expand := func(s string) string {
 		return envPattern.ReplaceAllStringFunc(s, func(match string) string {
@@ -418,7 +419,7 @@ func (c *Config) WriteConfig(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
-	return os.WriteFile(path, data, 0644)
+	return os.WriteFile(path, data, 0600)
 }
 
 // IsInheritedTarget checks if a target inherits from another target

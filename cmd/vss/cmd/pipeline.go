@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -160,6 +161,10 @@ func printResults(results []pipeline.Result) {
 			syncResults = append(syncResults, r)
 		}
 	}
+
+	// Sort results by target name for deterministic output
+	sort.Slice(mergeResults, func(i, j int) bool { return mergeResults[i].Target < mergeResults[j].Target })
+	sort.Slice(syncResults, func(i, j int) bool { return syncResults[i].Target < syncResults[j].Target })
 
 	if len(mergeResults) > 0 {
 		fmt.Println("\nMerge Phase:")

@@ -41,9 +41,10 @@ func runContext(cmd *cobra.Command, args []string) error {
 	var awsConfig *pipeline.AWSConfig
 	if cfgFile != "" {
 		cfg, err := pipeline.LoadConfig(cfgFile)
-		if err == nil {
-			awsConfig = &cfg.AWS
+		if err != nil {
+			return fmt.Errorf("failed to load config file '%s': %w", cfgFile, err)
 		}
+		awsConfig = &cfg.AWS
 	}
 
 	// Use defaults if no config

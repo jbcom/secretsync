@@ -445,19 +445,14 @@ vss pipeline --config config.yaml --log-level debug --log-format json
 
 ## Migration from terraform-aws-secretsmanager
 
-If you're migrating from the Terraform-based pipeline:
+If you're migrating from the Terraform-based pipeline, manually convert your configuration:
 
-```bash
-# Export existing config
-vss migrate --from terraform-secretsmanager \
-            --targets config/targets.yaml \
-            --secrets config/secrets.yaml \
-            --accounts config/accounts.yaml \
-            --output config.yaml
-```
+1. Map your `targets.yaml` to the new `targets:` section
+2. Map your `secrets.yaml` to the new `sources:` section
+3. Map your `accounts.yaml` account IDs to target `account_id` fields
 
-Key differences:
+Key differences from the Terraform-based approach:
 - No Terraform state required
 - No Lambda functions needed
-- No S3 intermediate storage (uses Vault merge store)
+- Vault merge store eliminates intermediate S3 storage (or use S3 merge store if preferred)
 - Single binary, runs anywhere

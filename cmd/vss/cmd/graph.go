@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/robertlestak/vault-secret-sync/pkg/pipeline"
@@ -120,6 +121,8 @@ func printInheritanceFlow(cfg *pipeline.Config, graph *pipeline.Graph) {
 			roots = append(roots, name)
 		}
 	}
+	// Sort roots for deterministic output
+	sort.Strings(roots)
 
 	// Build inheritance tree
 	for _, root := range roots {
@@ -137,16 +140,13 @@ func printInheritanceTree(cfg *pipeline.Config, graph *pipeline.Graph, name stri
 	target := cfg.Targets[name]
 	fmt.Printf("%s%s %s (→ %s)\n", prefix, connector, name, target.AccountID)
 
-	// Find children (targets that inherit from this one)
+	// Find children (targets that inherit from this one) using pre-computed graph
 	var children []string
-	for childName, childTarget := range cfg.Targets {
-		for _, imp := range childTarget.Imports {
-			if imp == name {
-				children = append(children, childName)
-				break
-			}
-		}
+	if node, ok := graph.Nodes[name]; ok {
+		children = append(children, node.DependedBy...)
 	}
+	// Sort children for deterministic output
+	sort.Strings(children)
 
 	// Print children
 	newPrefix := prefix
