@@ -867,20 +867,20 @@ func (p *Pipeline) fetchVaultSecrets(ctx context.Context, path string) (map[stri
 		"action": "fetchVaultSecrets",
 		"path":   path,
 	})
-	
+
 	// Create a Vault client
 	vaultClient := &vault.VaultClient{
 		Address:   p.config.Vault.Address,
 		Namespace: p.config.Vault.Namespace,
 		Path:      path,
 	}
-	
+
 	if err := vaultClient.Init(ctx); err != nil {
 		l.WithError(err).Debug("Failed to initialize Vault client")
 		return nil, err
 	}
 	defer vaultClient.Close()
-	
+
 	// List all secrets at the path
 	secretsList, err := vaultClient.ListSecrets(ctx, path)
 	if err != nil {
@@ -888,7 +888,7 @@ func (p *Pipeline) fetchVaultSecrets(ctx context.Context, path string) (map[stri
 		// Return empty map if path doesn't exist (no secrets yet)
 		return map[string]interface{}{}, nil
 	}
-	
+
 	// Fetch each secret
 	secrets := make(map[string]interface{})
 	for _, secretName := range secretsList {
@@ -898,7 +898,7 @@ func (p *Pipeline) fetchVaultSecrets(ctx context.Context, path string) (map[stri
 			l.WithError(err).WithField("secretPath", secretPath).Debug("Failed to get secret")
 			continue
 		}
-		
+
 		// Parse the secret data
 		var data interface{}
 		if err := json.Unmarshal(secretData, &data); err != nil {
@@ -907,7 +907,7 @@ func (p *Pipeline) fetchVaultSecrets(ctx context.Context, path string) (map[stri
 		}
 		secrets[secretName] = data
 	}
-	
+
 	return secrets, nil
 }
 
@@ -918,26 +918,26 @@ func (p *Pipeline) fetchAWSSecrets(ctx context.Context, roleARN, region string) 
 		"roleARN": roleARN,
 		"region":  region,
 	})
-	
+
 	// Create an AWS client
 	awsClient := &aws.AwsClient{
 		RoleArn: roleARN,
 		Region:  region,
 		Name:    "fetch-current-state",
 	}
-	
+
 	if err := awsClient.Init(ctx); err != nil {
 		l.WithError(err).Debug("Failed to initialize AWS client")
 		return nil, err
 	}
-	
+
 	// List all secrets
 	secretsList, err := awsClient.ListSecrets(ctx, "")
 	if err != nil {
 		l.WithError(err).Debug("Failed to list AWS secrets")
 		return map[string]interface{}{}, nil
 	}
-	
+
 	// Fetch each secret
 	secrets := make(map[string]interface{})
 	for _, secretName := range secretsList {
@@ -946,7 +946,7 @@ func (p *Pipeline) fetchAWSSecrets(ctx context.Context, roleARN, region string) 
 			l.WithError(err).WithField("secretName", secretName).Debug("Failed to get secret")
 			continue
 		}
-		
+
 		// Parse the secret data
 		var data interface{}
 		if err := json.Unmarshal(secretData, &data); err != nil {
@@ -955,7 +955,7 @@ func (p *Pipeline) fetchAWSSecrets(ctx context.Context, roleARN, region string) 
 		}
 		secrets[secretName] = data
 	}
-	
+
 	return secrets, nil
 }
 
@@ -965,18 +965,18 @@ func (p *Pipeline) fetchS3MergeSecrets(ctx context.Context, targetName string) (
 		"action": "fetchS3MergeSecrets",
 		"target": targetName,
 	})
-	
+
 	if p.s3Store == nil {
 		return map[string]interface{}{}, nil
 	}
-	
+
 	// List all secrets for the target from S3
 	secrets, err := p.s3Store.ListSecrets(ctx, targetName)
 	if err != nil {
 		l.WithError(err).Debug("Failed to list S3 secrets")
 		return map[string]interface{}{}, nil
 	}
-	
+
 	// Fetch each secret
 	secretsMap := make(map[string]interface{})
 	for _, secretName := range secrets {
@@ -987,7 +987,7 @@ func (p *Pipeline) fetchS3MergeSecrets(ctx context.Context, targetName string) (
 		}
 		secretsMap[secretName] = secretData
 	}
-	
+
 	return secretsMap, nil
 }
 
@@ -997,11 +997,11 @@ func (p *Pipeline) computeMergeDiff(ctx context.Context, targetName string, sour
 		"action": "computeMergeDiff",
 		"target": targetName,
 	})
-	
+
 	// Fetch current state from merge store
 	var currentSecrets map[string]interface{}
 	var err error
-	
+
 	if p.config.MergeStore.Vault != nil {
 		mergePath := fmt.Sprintf("%s/%s", p.config.MergeStore.Vault.Mount, targetName)
 		currentSecrets, err = p.fetchVaultSecrets(ctx, mergePath)
@@ -1016,12 +1016,13 @@ func (p *Pipeline) computeMergeDiff(ctx context.Context, targetName string, sour
 			currentSecrets = make(map[string]interface{})
 		}
 	}
-	
+
 	// Fetch desired state from source paths
-	// For merge operations, the desired state would be the aggregation of all sources
-	// This is complex as it involves the deepmerge logic
-	// For simplicity, we'll use the current implementation approach
-	// and consider the operation successful if secrets were processed
+	// NOTE: This is a simplified implementation for diff calculation purposes.
+	// The actual merge operation uses deepmerge logic with proper precedence handling.
+	// This diff may not perfectly reflect merge conflicts when multiple sources
+	// contain the same secret path, but it provides a good approximation for
+	// zero-sum validation and change tracking.
 	desiredSecrets := make(map[string]interface{})
 	for _, sourcePath := range sourcePaths {
 		sourceSecrets, err := p.fetchVaultSecrets(ctx, sourcePath)
@@ -1029,22 +1030,22 @@ func (p *Pipeline) computeMergeDiff(ctx context.Context, targetName string, sour
 			l.WithError(err).WithField("sourcePath", sourcePath).Debug("Failed to fetch source secrets")
 			continue
 		}
-		// Simple merge - in production this would use deepmerge logic
+		// Simple merge - last source wins (actual merge uses deepmerge logic)
 		for k, v := range sourceSecrets {
 			desiredSecrets[k] = v
 		}
 	}
-	
+
 	// Compute diff
 	changes := diff.DiffSecrets(currentSecrets, desiredSecrets)
 	summary := diff.ComputeSummary(changes)
-	
+
 	targetDiff := &diff.TargetDiff{
 		Target:  targetName,
 		Changes: changes,
 		Summary: summary,
 	}
-	
+
 	return targetDiff, nil
 }
 
@@ -1054,14 +1055,14 @@ func (p *Pipeline) computeSyncDiff(ctx context.Context, targetName string, roleA
 		"action": "computeSyncDiff",
 		"target": targetName,
 	})
-	
+
 	// Fetch current state from AWS
 	currentSecrets, err := p.fetchAWSSecrets(ctx, roleARN, region)
 	if err != nil {
 		l.WithError(err).Debug("Failed to fetch current AWS state")
 		currentSecrets = make(map[string]interface{})
 	}
-	
+
 	// Fetch desired state from merge store
 	var desiredSecrets map[string]interface{}
 	if p.config.MergeStore.Vault != nil {
@@ -1078,17 +1079,17 @@ func (p *Pipeline) computeSyncDiff(ctx context.Context, targetName string, roleA
 			desiredSecrets = make(map[string]interface{})
 		}
 	}
-	
+
 	// Compute diff
 	changes := diff.DiffSecrets(currentSecrets, desiredSecrets)
 	summary := diff.ComputeSummary(changes)
-	
+
 	targetDiff := &diff.TargetDiff{
 		Target:  targetName,
 		Changes: changes,
 		Summary: summary,
 	}
-	
+
 	return targetDiff, nil
 }
 
@@ -1107,7 +1108,7 @@ func (p *Pipeline) FormatDiff(format diff.OutputFormat) string {
 func (p *Pipeline) ExitCode() int {
 	p.diffMu.Lock()
 	defer p.diffMu.Unlock()
-	
+
 	// Check for errors first
 	p.resultsMu.Lock()
 	hasErrors := false
@@ -1118,15 +1119,15 @@ func (p *Pipeline) ExitCode() int {
 		}
 	}
 	p.resultsMu.Unlock()
-	
+
 	if hasErrors {
 		return 2
 	}
-	
+
 	if p.pipelineDiff != nil {
 		return p.pipelineDiff.ExitCode()
 	}
-	
+
 	return 0
 }
 
