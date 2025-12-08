@@ -320,7 +320,9 @@ func TestFetchSecretsHelpers_Errors(t *testing.T) {
 				Mount: "kv/merged",
 			},
 		},
-		Targets: map[string]Target{},
+		Targets: map[string]Target{
+			"dummy": {AccountID: "123456789012", Imports: []string{}},
+		},
 		Pipeline: PipelineSettings{
 			Merge: MergeSettings{Parallel: 1},
 			Sync:  SyncSettings{Parallel: 1},
