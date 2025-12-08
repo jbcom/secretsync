@@ -395,7 +395,7 @@ func (ec *AWSExecutionContext) GetIdentityCenterClient(ctx context.Context) (*ss
 	return ec.ssoClient, nil
 }
 
-// ListOrganizationAccounts returns all accounts in the organization
+// ListOrganizationAccounts returns all accounts in the organization with tags
 func (ec *AWSExecutionContext) ListOrganizationAccounts(ctx context.Context) ([]AccountInfo, error) {
 	if !ec.CanAccessOrganizations() {
 		return nil, fmt.Errorf("no access to Organizations API from this execution context")
@@ -411,11 +411,21 @@ func (ec *AWSExecutionContext) ListOrganizationAccounts(ctx context.Context) ([]
 		}
 
 		for _, acct := range output.Accounts {
+			accountID := aws.ToString(acct.Id)
+			
+			// Fetch tags for this account
+			tags, err := ec.GetAccountTags(ctx, accountID)
+			if err != nil {
+				// Log warning but continue - tags might not be accessible
+				log.WithError(err).WithField("accountID", accountID).Debug("Failed to get account tags")
+			}
+			
 			accounts = append(accounts, AccountInfo{
-				ID:     aws.ToString(acct.Id),
+				ID:     accountID,
 				Name:   aws.ToString(acct.Name),
 				Email:  aws.ToString(acct.Email),
 				Status: string(acct.Status),
+				Tags:   tags,
 			})
 		}
 	}
@@ -423,7 +433,7 @@ func (ec *AWSExecutionContext) ListOrganizationAccounts(ctx context.Context) ([]
 	return accounts, nil
 }
 
-// ListAccountsInOU returns accounts in a specific Organizational Unit
+// ListAccountsInOU returns accounts in a specific Organizational Unit with tags
 func (ec *AWSExecutionContext) ListAccountsInOU(ctx context.Context, ouID string) ([]AccountInfo, error) {
 	if !ec.CanAccessOrganizations() {
 		return nil, fmt.Errorf("no access to Organizations API from this execution context")
@@ -441,11 +451,21 @@ func (ec *AWSExecutionContext) ListAccountsInOU(ctx context.Context, ouID string
 		}
 
 		for _, acct := range output.Accounts {
+			accountID := aws.ToString(acct.Id)
+			
+			// Fetch tags for this account
+			tags, err := ec.GetAccountTags(ctx, accountID)
+			if err != nil {
+				// Log warning but continue - tags might not be accessible
+				log.WithError(err).WithField("accountID", accountID).Debug("Failed to get account tags")
+			}
+			
 			accounts = append(accounts, AccountInfo{
-				ID:     aws.ToString(acct.Id),
+				ID:     accountID,
 				Name:   aws.ToString(acct.Name),
 				Email:  aws.ToString(acct.Email),
 				Status: string(acct.Status),
+				Tags:   tags,
 			})
 		}
 	}
@@ -476,6 +496,31 @@ func (ec *AWSExecutionContext) ListChildOUs(ctx context.Context, parentID string
 	}
 
 	return childOUs, nil
+}
+
+// GetAccountTags retrieves tags for an AWS account
+func (ec *AWSExecutionContext) GetAccountTags(ctx context.Context, accountID string) (map[string]string, error) {
+	if !ec.CanAccessOrganizations() {
+		return nil, fmt.Errorf("no access to Organizations API from this execution context")
+	}
+
+	tags := make(map[string]string)
+	paginator := organizations.NewListTagsForResourcePaginator(ec.orgClient, &organizations.ListTagsForResourceInput{
+		ResourceId: aws.String(accountID),
+	})
+
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list tags for account %s: %w", accountID, err)
+		}
+
+		for _, tag := range output.Tags {
+			tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
+		}
+	}
+
+	return tags, nil
 }
 
 // AccountInfo contains basic AWS account information
