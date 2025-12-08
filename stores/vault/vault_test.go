@@ -14,10 +14,6 @@ import (
 
 // mockLogical implements the Vault logical interface for testing
 type mockLogical struct {
-	readFunc              func(ctx context.Context, path string) (*api.Secret, error)
-	writeFunc             func(ctx context.Context, path string, data map[string]interface{}) (*api.Secret, error)
-	deleteFunc            func(ctx context.Context, path string) (*api.Secret, error)
-	listFunc              func(ctx context.Context, path string) (*api.Secret, error)
 	readWithContextFunc   func(ctx context.Context, path string) (*api.Secret, error)
 	writeWithContextFunc  func(ctx context.Context, path string, data map[string]interface{}) (*api.Secret, error)
 	deleteWithContextFunc func(ctx context.Context, path string) (*api.Secret, error)
@@ -44,18 +40,12 @@ func (m *mockLogical) ReadWithContext(ctx context.Context, path string) (*api.Se
 	if m.readWithContextFunc != nil {
 		return m.readWithContextFunc(ctx, path)
 	}
-	if m.readFunc != nil {
-		return m.readFunc(ctx, path)
-	}
 	return nil, nil
 }
 
 func (m *mockLogical) WriteWithContext(ctx context.Context, path string, data map[string]interface{}) (*api.Secret, error) {
 	if m.writeWithContextFunc != nil {
 		return m.writeWithContextFunc(ctx, path, data)
-	}
-	if m.writeFunc != nil {
-		return m.writeFunc(ctx, path, data)
 	}
 	return nil, nil
 }
@@ -64,18 +54,12 @@ func (m *mockLogical) DeleteWithContext(ctx context.Context, path string) (*api.
 	if m.deleteWithContextFunc != nil {
 		return m.deleteWithContextFunc(ctx, path)
 	}
-	if m.deleteFunc != nil {
-		return m.deleteFunc(ctx, path)
-	}
 	return nil, nil
 }
 
 func (m *mockLogical) ListWithContext(ctx context.Context, path string) (*api.Secret, error) {
 	if m.listWithContextFunc != nil {
 		return m.listWithContextFunc(ctx, path)
-	}
-	if m.listFunc != nil {
-		return m.listFunc(ctx, path)
 	}
 	return nil, nil
 }

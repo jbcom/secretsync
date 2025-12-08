@@ -114,12 +114,17 @@ func TestPipeline_Operations(t *testing.T) {
 
 func TestPipeline_Result(t *testing.T) {
 	tests := []struct {
-		name   string
-		result Result
+		name     string
+		result   Result
+		expected Result
 	}{
 		{
 			name: "Successful result",
 			result: Result{
+				Target:  "test-target",
+				Success: true,
+			},
+			expected: Result{
 				Target:  "test-target",
 				Success: true,
 			},
@@ -131,13 +136,20 @@ func TestPipeline_Result(t *testing.T) {
 				Success: false,
 				Error:   errors.New("test error"),
 			},
+			expected: Result{
+				Target:  "test-target",
+				Success: false,
+			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.result.Target, tt.result.Target)
-			assert.Equal(t, tt.result.Success, tt.result.Success)
+			assert.Equal(t, tt.expected.Target, tt.result.Target)
+			assert.Equal(t, tt.expected.Success, tt.result.Success)
+			if tt.result.Error != nil {
+				assert.NotNil(t, tt.result.Error)
+			}
 		})
 	}
 }

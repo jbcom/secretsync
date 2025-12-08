@@ -191,8 +191,10 @@ func TestPipelineCmd(t *testing.T) {
 			cmd.SetErr(buf)
 			
 			err := cmd.Execute()
-			if tt.expectError && err == nil {
-				t.Error("Expected an error but got none")
+			if tt.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
 			}
 		})
 	}
