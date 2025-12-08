@@ -816,6 +816,7 @@ func (p *Pipeline) initDiff(dryRun bool, configPath string) {
 }
 
 // addTargetDiff adds a target diff to the pipeline diff
+// nolint:unused // Will be used when diff tracking is fully integrated into merge/sync phases
 func (p *Pipeline) addTargetDiff(td diff.TargetDiff) {
 	p.diffMu.Lock()
 	defer p.diffMu.Unlock()
