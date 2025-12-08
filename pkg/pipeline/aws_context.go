@@ -413,19 +413,12 @@ func (ec *AWSExecutionContext) ListOrganizationAccounts(ctx context.Context) ([]
 		for _, acct := range output.Accounts {
 			accountID := aws.ToString(acct.Id)
 
-			// Fetch tags for this account
-			tags, err := ec.GetAccountTags(ctx, accountID)
-			if err != nil {
-				// Log warning but continue - tags might not be accessible
-				log.WithError(err).WithField("accountID", accountID).Debug("Failed to get account tags")
-			}
-
 			accounts = append(accounts, AccountInfo{
 				ID:     accountID,
 				Name:   aws.ToString(acct.Name),
 				Email:  aws.ToString(acct.Email),
 				Status: string(acct.Status),
-				Tags:   tags,
+				Tags:   ec.getAccountTagsSafely(ctx, accountID),
 			})
 		}
 	}
@@ -453,19 +446,12 @@ func (ec *AWSExecutionContext) ListAccountsInOU(ctx context.Context, ouID string
 		for _, acct := range output.Accounts {
 			accountID := aws.ToString(acct.Id)
 
-			// Fetch tags for this account
-			tags, err := ec.GetAccountTags(ctx, accountID)
-			if err != nil {
-				// Log warning but continue - tags might not be accessible
-				log.WithError(err).WithField("accountID", accountID).Debug("Failed to get account tags")
-			}
-
 			accounts = append(accounts, AccountInfo{
 				ID:     accountID,
 				Name:   aws.ToString(acct.Name),
 				Email:  aws.ToString(acct.Email),
 				Status: string(acct.Status),
-				Tags:   tags,
+				Tags:   ec.getAccountTagsSafely(ctx, accountID),
 			})
 		}
 	}
@@ -521,6 +507,25 @@ func (ec *AWSExecutionContext) GetAccountTags(ctx context.Context, accountID str
 	}
 
 	return tags, nil
+}
+
+// getAccountTagsSafely retrieves tags for an account with error handling
+// Returns empty map on error but logs appropriately based on error type
+func (ec *AWSExecutionContext) getAccountTagsSafely(ctx context.Context, accountID string) map[string]string {
+	tags, err := ec.GetAccountTags(ctx, accountID)
+	if err != nil {
+		// Check if it's a permission error (common and expected in some contexts)
+		if strings.Contains(err.Error(), "AccessDenied") ||
+			strings.Contains(err.Error(), "UnauthorizedOperation") ||
+			strings.Contains(err.Error(), "no access to Organizations") {
+			log.WithError(err).WithField("accountID", accountID).Debug("No permission to get account tags, continuing without tags")
+		} else {
+			// Other errors might indicate a more serious problem
+			log.WithError(err).WithField("accountID", accountID).Warn("Failed to get account tags")
+		}
+		return make(map[string]string)
+	}
+	return tags
 }
 
 // AccountInfo contains basic AWS account information
