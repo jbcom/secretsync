@@ -2,6 +2,11 @@
 
 > **Universal Secrets Synchronization Pipeline**
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub release](https://img.shields.io/github/release/jbcom/secretsync.svg)](https://github.com/jbcom/secretsync/releases)
+[![Docker Image](https://img.shields.io/badge/docker-jbcom%2Fsecretsync-blue)](https://hub.docker.com/r/jbcom/secretsync)
+[![Go Report Card](https://goreportcard.com/badge/github.com/jbcom/secretsync)](https://goreportcard.com/report/github.com/jbcom/secretsync)
+
 SecretSync provides fully automated, real-time secret synchronization across multiple cloud providers and secret stores. It supports a two-phase pipeline architecture (merge → sync) with inheritance, dynamic target discovery, and CI/CD-friendly diff reporting.
 
 ## Attribution

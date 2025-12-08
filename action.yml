@@ -65,20 +65,15 @@ inputs:
 runs:
   using: 'docker'
   image: 'Dockerfile'
-  args:
-    - 'pipeline'
-    - '--config'
-    - ${{ inputs.config }}
-    - ${{ inputs.targets != '' && format('--targets={0}', inputs.targets) || '' }}
-    - ${{ inputs.dry-run == 'true' && '--dry-run' || '' }}
-    - ${{ inputs.merge-only == 'true' && '--merge-only' || '' }}
-    - ${{ inputs.sync-only == 'true' && '--sync-only' || '' }}
-    - ${{ inputs.discover == 'true' && '--discover' || '' }}
-    - '--output'
-    - ${{ inputs.output-format }}
-    - ${{ inputs.compute-diff == 'true' && '--diff' || '' }}
-    - ${{ inputs.exit-code == 'true' && '--exit-code' || '' }}
-    - '--log-level'
-    - ${{ inputs.log-level }}
-    - '--log-format'
-    - ${{ inputs.log-format }}
+  env:
+    INPUT_CONFIG: ${{ inputs.config }}
+    INPUT_TARGETS: ${{ inputs.targets }}
+    INPUT_DRY_RUN: ${{ inputs.dry-run }}
+    INPUT_MERGE_ONLY: ${{ inputs.merge-only }}
+    INPUT_SYNC_ONLY: ${{ inputs.sync-only }}
+    INPUT_DISCOVER: ${{ inputs.discover }}
+    INPUT_OUTPUT_FORMAT: ${{ inputs.output-format }}
+    INPUT_COMPUTE_DIFF: ${{ inputs.compute-diff }}
+    INPUT_EXIT_CODE: ${{ inputs.exit-code }}
+    INPUT_LOG_LEVEL: ${{ inputs.log-level }}
+    INPUT_LOG_FORMAT: ${{ inputs.log-format }}
