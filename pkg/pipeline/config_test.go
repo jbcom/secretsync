@@ -201,6 +201,72 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: true,
 			errMsg:  "import \"nonexistent\" not found",
 		},
+		{
+			name: "valid S3 merge store",
+			config: Config{
+				Vault: VaultConfig{Address: "https://vault.example.com"},
+				Sources: map[string]Source{
+					"analytics": {Vault: &VaultSource{Mount: "analytics"}},
+				},
+				MergeStore: MergeStoreConfig{S3: &MergeStoreS3{Bucket: "my-bucket", Prefix: "secrets/"}},
+				Targets: map[string]Target{
+					"Stg": {AccountID: "111111111111", Imports: []string{"analytics"}},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "S3 merge store missing bucket",
+			config: Config{
+				Vault: VaultConfig{Address: "https://vault.example.com"},
+				Sources: map[string]Source{
+					"analytics": {Vault: &VaultSource{Mount: "analytics"}},
+				},
+				MergeStore: MergeStoreConfig{S3: &MergeStoreS3{Prefix: "secrets/"}},
+				Targets: map[string]Target{
+					"Stg": {AccountID: "111111111111", Imports: []string{"analytics"}},
+				},
+			},
+			wantErr: true,
+			errMsg:  "merge_store.s3.bucket is required",
+		},
+		{
+			name: "valid dynamic target",
+			config: Config{
+				Vault: VaultConfig{Address: "https://vault.example.com"},
+				Sources: map[string]Source{
+					"analytics": {Vault: &VaultSource{Mount: "analytics"}},
+				},
+				MergeStore: MergeStoreConfig{Vault: &MergeStoreVault{Mount: "merged"}},
+				DynamicTargets: map[string]DynamicTarget{
+					"sandboxes": {
+						Discovery: DiscoveryConfig{
+							IdentityCenter: &IdentityCenterDiscovery{Group: "Engineers"},
+						},
+						Imports: []string{"analytics"},
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "dynamic target missing discovery config",
+			config: Config{
+				Vault: VaultConfig{Address: "https://vault.example.com"},
+				Sources: map[string]Source{
+					"analytics": {Vault: &VaultSource{Mount: "analytics"}},
+				},
+				MergeStore: MergeStoreConfig{Vault: &MergeStoreVault{Mount: "merged"}},
+				DynamicTargets: map[string]DynamicTarget{
+					"sandboxes": {
+						Discovery: DiscoveryConfig{},
+						Imports:   []string{"analytics"},
+					},
+				},
+			},
+			wantErr: true,
+			errMsg:  "must specify identity_center or organizations discovery",
+		},
 	}
 
 	for _, tt := range tests {

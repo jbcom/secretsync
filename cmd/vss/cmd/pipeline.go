@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	targets   string
-	mergeOnly bool
-	syncOnly  bool
-	dryRun    bool
+	targets        string
+	mergeOnly      bool
+	syncOnly       bool
+	dryRun         bool
+	discoverTargets bool
 )
 
 // pipelineCmd runs the full merge-then-sync pipeline
@@ -57,6 +58,7 @@ func init() {
 	pipelineCmd.Flags().BoolVar(&mergeOnly, "merge-only", false, "only run merge phase")
 	pipelineCmd.Flags().BoolVar(&syncOnly, "sync-only", false, "only run sync phase")
 	pipelineCmd.Flags().BoolVar(&dryRun, "dry-run", false, "dry run mode (no changes)")
+	pipelineCmd.Flags().BoolVar(&discoverTargets, "discover", false, "enable dynamic target discovery from AWS Organizations/Identity Center")
 }
 
 func runPipeline(cmd *cobra.Command, args []string) error {
@@ -64,15 +66,24 @@ func runPipeline(cmd *cobra.Command, args []string) error {
 		"action": "runPipeline",
 	})
 
-	// Create pipeline from config file
-	p, err := pipeline.NewFromFile(cfgFile)
-	if err != nil {
-		return fmt.Errorf("failed to create pipeline: %w", err)
-	}
-
 	// Setup context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Create pipeline from config file
+	var p *pipeline.Pipeline
+	var err error
+	
+	if discoverTargets {
+		// Use context-aware constructor for dynamic target discovery
+		l.Info("Dynamic target discovery enabled")
+		p, err = pipeline.NewFromFileWithContext(ctx, cfgFile)
+	} else {
+		p, err = pipeline.NewFromFile(cfgFile)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to create pipeline: %w", err)
+	}
 
 	// Handle signals
 	sigChan := make(chan os.Signal, 1)

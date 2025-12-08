@@ -756,13 +756,19 @@ func (p *Pipeline) Results() []Result {
 
 // GenerateConfigs generates VaultSecretSync configs without executing them
 // Useful for GitOps workflows or Kubernetes CRD generation
+// Note: S3 merge store doesn't generate VaultSecretSync configs (it's handled differently)
 func (p *Pipeline) GenerateConfigs(opts Options) ([]v1alpha1.VaultSecretSync, error) {
 	var configs []v1alpha1.VaultSecretSync
 
+	// S3 merge store doesn't use VaultSecretSync for the merge phase
+	if p.config.MergeStore.Vault == nil {
+		log.Warn("GenerateConfigs only supports Vault merge store; S3 merge store operations are handled inline")
+	}
+
 	targets := p.resolveTargets(opts.Targets)
 
-	// Generate merge configs
-	if opts.Operation == OperationMerge || opts.Operation == OperationPipeline {
+	// Generate merge configs (only for Vault merge store)
+	if (opts.Operation == OperationMerge || opts.Operation == OperationPipeline) && p.config.MergeStore.Vault != nil {
 		for _, targetName := range targets {
 			target := p.config.Targets[targetName]
 			mergePath := fmt.Sprintf("%s/%s", p.config.MergeStore.Vault.Mount, targetName)
@@ -775,12 +781,23 @@ func (p *Pipeline) GenerateConfigs(opts Options) ([]v1alpha1.VaultSecretSync, er
 		}
 	}
 
-	// Generate sync configs
+	// Generate sync configs (only for Vault merge store - S3 requires different handling)
 	if opts.Operation == OperationSync || opts.Operation == OperationPipeline {
 		for _, targetName := range targets {
 			target := p.config.Targets[targetName]
 			roleARN := p.config.GetRoleARN(target.AccountID)
-			sourcePath := fmt.Sprintf("%s/%s", p.config.MergeStore.Vault.Mount, targetName)
+
+			// Determine source path based on merge store
+			var sourcePath string
+			if p.config.MergeStore.Vault != nil {
+				sourcePath = fmt.Sprintf("%s/%s", p.config.MergeStore.Vault.Mount, targetName)
+			} else if p.config.MergeStore.S3 != nil {
+				// S3 merge store - sync configs would need to read from S3
+				// This is a limitation: VaultSecretSync expects Vault as source
+				log.WithField("target", targetName).Warn("S3 merge store sync requires custom handling")
+				continue
+			}
+
 			region := target.Region
 			if region == "" {
 				region = p.config.AWS.Region
