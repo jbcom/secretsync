@@ -116,9 +116,39 @@ targets:
     account_id: "222222222222"
 ```
 
-## CI/CD Integration
+## GitHub Actions
 
-### GitHub Actions
+SecretSync is available as a GitHub Action for seamless CI/CD integration:
+
+```yaml
+- name: Sync Secrets
+  uses: jbcom/secretsync@v1
+  with:
+    config: config.yaml
+    dry-run: 'false'
+    output-format: 'github'
+  env:
+    VAULT_ROLE_ID: ${{ secrets.VAULT_ROLE_ID }}
+    VAULT_SECRET_ID: ${{ secrets.VAULT_SECRET_ID }}
+```
+
+**Key Features:**
+- 🔒 Native OIDC support for AWS authentication
+- 📊 GitHub-native diff annotations in PRs
+- 🎯 Exit codes for CI/CD control flow
+- 🔄 Automatic Docker multi-arch builds
+- ⚡ Zero configuration needed beyond config file
+
+**Quick Start:**
+1. Add `config.yaml` to your repository
+2. Configure AWS OIDC and Vault secrets
+3. Use the action in your workflow
+
+See [GitHub Actions documentation](./docs/GITHUB_ACTIONS.md) for complete usage guide and examples.
+
+## CI/CD Integration (CLI)
+
+### GitHub Actions (CLI)
 
 ```yaml
 - name: Validate secrets pipeline
