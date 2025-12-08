@@ -21,6 +21,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+	"github.com/aws/smithy-go"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -485,6 +487,14 @@ func (ec *AWSExecutionContext) ListChildOUs(ctx context.Context, parentID string
 }
 
 // GetAccountTags retrieves tags for an AWS account
+//
+// Performance Note: This method makes an API call for each account.
+// For large organizations with many accounts (100+), consider:
+//   - Limiting discovery scope using OU filters
+//   - Using tag filtering only when necessary
+//   - Monitoring AWS API rate limits (Organizations API throttles at 20 TPS)
+//
+// Future optimization: Implement batch tag fetching or caching if needed
 func (ec *AWSExecutionContext) GetAccountTags(ctx context.Context, accountID string) (map[string]string, error) {
 	if !ec.CanAccessOrganizations() {
 		return nil, fmt.Errorf("no access to Organizations API from this execution context")
@@ -514,13 +524,30 @@ func (ec *AWSExecutionContext) GetAccountTags(ctx context.Context, accountID str
 func (ec *AWSExecutionContext) getAccountTagsSafely(ctx context.Context, accountID string) map[string]string {
 	tags, err := ec.GetAccountTags(ctx, accountID)
 	if err != nil {
-		// Check if it's a permission error (common and expected in some contexts)
-		if strings.Contains(err.Error(), "AccessDenied") ||
-			strings.Contains(err.Error(), "UnauthorizedOperation") ||
-			strings.Contains(err.Error(), "no access to Organizations") {
-			log.WithError(err).WithField("accountID", accountID).Debug("No permission to get account tags, continuing without tags")
+		// Use AWS SDK error types for more robust error classification
+		var apiErr smithy.APIError
+		if errors.As(err, &apiErr) {
+			errorCode := apiErr.ErrorCode()
+
+			// Check for permission-related errors (expected in some contexts)
+			switch errorCode {
+			case "AccessDeniedException", "AccessDenied", "UnauthorizedOperation":
+				log.WithFields(log.Fields{
+					"accountID": accountID,
+					"errorCode": errorCode,
+				}).Debug("No permission to get account tags, continuing without tags")
+			default:
+				// Other API errors might indicate a more serious problem
+				log.WithFields(log.Fields{
+					"accountID": accountID,
+					"errorCode": errorCode,
+				}).Warn("Failed to get account tags")
+			}
+		} else if strings.Contains(err.Error(), "no access to Organizations") {
+			// Context doesn't have Organizations access
+			log.WithError(err).WithField("accountID", accountID).Debug("No Organizations access, continuing without tags")
 		} else {
-			// Other errors might indicate a more serious problem
+			// Non-API errors
 			log.WithError(err).WithField("accountID", accountID).Warn("Failed to get account tags")
 		}
 		return make(map[string]string)
