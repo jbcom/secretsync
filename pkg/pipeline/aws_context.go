@@ -3,17 +3,17 @@
 // AWS Organizations supports two primary patterns for cross-account operations:
 //
 // 1. MANAGEMENT ACCOUNT: The root account that owns the AWS Organization
-//    - Has implicit trust from OrganizationAccountAccessRole in all member accounts
-//    - Can assume AWSControlTowerExecution in Control Tower enrolled accounts
-//    - Full Organizations API access
-//    - Full Identity Center admin access
-//    - NOT recommended for production workloads (security best practice)
+//   - Has implicit trust from OrganizationAccountAccessRole in all member accounts
+//   - Can assume AWSControlTowerExecution in Control Tower enrolled accounts
+//   - Full Organizations API access
+//   - Full Identity Center admin access
+//   - NOT recommended for production workloads (security best practice)
 //
 // 2. DELEGATED ADMINISTRATOR: A member account with delegated permissions
-//    - Requires explicit delegation via Organizations RegisterDelegatedAdministrator
-//    - Can be delegated for specific services (SSO, CloudFormation StackSets, etc.)
-//    - More secure - separates admin workloads from org management
-//    - Requires custom cross-account role deployment (StackSets, AFT, etc.)
+//   - Requires explicit delegation via Organizations RegisterDelegatedAdministrator
+//   - Can be delegated for specific services (SSO, CloudFormation StackSets, etc.)
+//   - More secure - separates admin workloads from org management
+//   - Requires custom cross-account role deployment (StackSets, AFT, etc.)
 //
 // This package handles both patterns and provides a unified interface for
 // cross-account secrets synchronization.
@@ -40,12 +40,12 @@ type AWSExecutionContext struct {
 	BaseConfig       aws.Config
 	CallerIdentity   *CallerIdentity
 	OrganizationInfo *OrganizationInfo
-	
+
 	// Cached clients
-	stsClient  *sts.Client
-	orgClient  *organizations.Client
-	ssoClient  *ssoadmin.Client
-	ssmClient  *ssm.Client
+	stsClient *sts.Client
+	orgClient *organizations.Client
+	ssoClient *ssoadmin.Client
+	ssmClient *ssm.Client
 }
 
 // CallerIdentity contains AWS STS GetCallerIdentity information
@@ -57,9 +57,9 @@ type CallerIdentity struct {
 
 // OrganizationInfo contains AWS Organizations information
 type OrganizationInfo struct {
-	ID                string
-	MasterAccountID   string
-	MasterAccountARN  string
+	ID                  string
+	MasterAccountID     string
+	MasterAccountARN    string
 	IsManagementAccount bool
 	IsDelegatedAdmin    bool
 	DelegatedServices   []string
@@ -182,9 +182,9 @@ func (ec *AWSExecutionContext) discoverOrganizationContext(ctx context.Context) 
 func (ec *AWSExecutionContext) discoverDelegatedServices(ctx context.Context) error {
 	// This requires calling from an account that can list delegated admins
 	// In practice, this might fail if we're not management account
-	
+
 	paginator := organizations.NewListDelegatedAdministratorsPaginator(ec.orgClient, &organizations.ListDelegatedAdministratorsInput{})
-	
+
 	for paginator.HasMorePages() {
 		output, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -314,7 +314,7 @@ func (ec *AWSExecutionContext) GetRoleARN(accountID string) string {
 // AssumeRoleConfig returns AWS config with assumed role credentials
 func (ec *AWSExecutionContext) AssumeRoleConfig(ctx context.Context, accountID string) (aws.Config, error) {
 	roleARN := ec.GetRoleARN(accountID)
-	
+
 	// No role assumption needed for same account
 	if roleARN == "" {
 		return ec.BaseConfig, nil
@@ -412,14 +412,14 @@ func (ec *AWSExecutionContext) ListOrganizationAccounts(ctx context.Context) ([]
 
 		for _, acct := range output.Accounts {
 			accountID := aws.ToString(acct.Id)
-			
+
 			// Fetch tags for this account
 			tags, err := ec.GetAccountTags(ctx, accountID)
 			if err != nil {
 				// Log warning but continue - tags might not be accessible
 				log.WithError(err).WithField("accountID", accountID).Debug("Failed to get account tags")
 			}
-			
+
 			accounts = append(accounts, AccountInfo{
 				ID:     accountID,
 				Name:   aws.ToString(acct.Name),
@@ -452,14 +452,14 @@ func (ec *AWSExecutionContext) ListAccountsInOU(ctx context.Context, ouID string
 
 		for _, acct := range output.Accounts {
 			accountID := aws.ToString(acct.Id)
-			
+
 			// Fetch tags for this account
 			tags, err := ec.GetAccountTags(ctx, accountID)
 			if err != nil {
 				// Log warning but continue - tags might not be accessible
 				log.WithError(err).WithField("accountID", accountID).Debug("Failed to get account tags")
 			}
-			
+
 			accounts = append(accounts, AccountInfo{
 				ID:     accountID,
 				Name:   aws.ToString(acct.Name),

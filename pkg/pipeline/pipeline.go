@@ -202,13 +202,13 @@ func DefaultOptions() Options {
 
 // Result represents the outcome of a single target operation
 type Result struct {
-	Target    string        `json:"target"`
-	Phase     string        `json:"phase"` // "merge" or "sync"
-	Operation string        `json:"operation"`
-	Success   bool          `json:"success"`
-	Error     error         `json:"error,omitempty"`
-	Duration  time.Duration `json:"duration"`
-	Details   ResultDetails `json:"details,omitempty"`
+	Target    string           `json:"target"`
+	Phase     string           `json:"phase"` // "merge" or "sync"
+	Operation string           `json:"operation"`
+	Success   bool             `json:"success"`
+	Error     error            `json:"error,omitempty"`
+	Duration  time.Duration    `json:"duration"`
+	Details   ResultDetails    `json:"details,omitempty"`
 	Diff      *diff.TargetDiff `json:"diff,omitempty"`
 }
 
@@ -840,7 +840,7 @@ func (p *Pipeline) FormatDiff(format diff.OutputFormat) string {
 func (p *Pipeline) ExitCode() int {
 	p.diffMu.Lock()
 	defer p.diffMu.Unlock()
-	
+
 	// Check for errors first
 	p.resultsMu.Lock()
 	hasErrors := false
@@ -851,15 +851,15 @@ func (p *Pipeline) ExitCode() int {
 		}
 	}
 	p.resultsMu.Unlock()
-	
+
 	if hasErrors {
 		return 2
 	}
-	
+
 	if p.pipelineDiff != nil {
 		return p.pipelineDiff.ExitCode()
 	}
-	
+
 	return 0
 }
 
