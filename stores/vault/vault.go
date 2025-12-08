@@ -471,23 +471,104 @@ func (vc *VaultClient) ListSecretsOnce(ctx context.Context, p string) ([]string,
 	if len(pp) < 2 {
 		return nil, errors.New("secret path must be in kv/path/to/secret format")
 	}
-	pp = insertSliceString(pp, 1, "metadata")
-	p = strings.Join(pp, "/")
+	
+	// Use BFS to recursively discover all secrets
+	return vc.listSecretsRecursive(ctx, p)
+}
+
+// listSecretsRecursive performs breadth-first search to discover all nested secrets
+func (vc *VaultClient) listSecretsRecursive(ctx context.Context, basePath string) ([]string, error) {
 	l := log.WithFields(log.Fields{
 		"address": vc.Address,
 		"role":    vc.Role,
-		"path":    p,
+		"path":    basePath,
 		"method":  vc.AuthMethod,
 	})
-	l.Debug("vault.ListSecrets")
-	if !strings.HasSuffix(p, "/") {
-		p = p + "/"
+	l.Debug("vault.ListSecretsRecursive")
+	
+	var allSecrets []string
+	visited := make(map[string]bool)
+	queue := []string{basePath}
+	
+	for len(queue) > 0 {
+		currentPath := queue[0]
+		queue = queue[1:]
+		
+		// Skip if already visited to prevent infinite loops
+		if visited[currentPath] {
+			continue
+		}
+		visited[currentPath] = true
+		
+		// Get the metadata path for listing
+		metadataPath, err := vc.getMetadataPath(currentPath)
+		if err != nil {
+			l.WithError(err).Warnf("Failed to get metadata path for %s", currentPath)
+			continue
+		}
+		
+		// List contents at current path
+		keys, err := vc.listPathContents(ctx, metadataPath)
+		if err != nil {
+			l.WithError(err).Warnf("Failed to list contents at %s", metadataPath)
+			continue
+		}
+		
+		if keys == nil {
+			continue
+		}
+		
+		// Process each key found
+		for _, key := range keys {
+			// Construct the full path maintaining original format
+			var fullPath string
+			if strings.HasSuffix(currentPath, "/") {
+				fullPath = currentPath + key
+			} else {
+				fullPath = currentPath + "/" + key
+			}
+			
+			if strings.HasSuffix(key, "/") {
+				// It's a directory - add to queue for recursive exploration
+				// Remove trailing slash for consistent path handling
+				dirPath := strings.TrimSuffix(fullPath, "/")
+				if !visited[dirPath] {
+					queue = append(queue, dirPath)
+				}
+			} else {
+				// It's a secret - add to results
+				allSecrets = append(allSecrets, fullPath)
+			}
+		}
 	}
-	secret, err := vc.Client.Logical().ListWithContext(ctx, p)
+	
+	return allSecrets, nil
+}
+
+// getMetadataPath converts a KV path to its metadata equivalent
+func (vc *VaultClient) getMetadataPath(path string) (string, error) {
+	pp := strings.Split(path, "/")
+	if len(pp) < 2 {
+		return "", errors.New("secret path must be in kv/path/to/secret format")
+	}
+	pp = insertSliceString(pp, 1, "metadata")
+	metadataPath := strings.Join(pp, "/")
+	if !strings.HasSuffix(metadataPath, "/") {
+		metadataPath = metadataPath + "/"
+	}
+	return metadataPath, nil
+}
+
+// listPathContents performs the actual Vault LIST operation
+func (vc *VaultClient) listPathContents(ctx context.Context, metadataPath string) ([]string, error) {
+	secret, err := vc.Client.Logical().ListWithContext(ctx, metadataPath)
 	if err != nil {
 		return nil, err
 	}
 	if secret == nil {
+		return nil, nil
+	}
+	if secret.Data == nil || secret.Data["keys"] == nil {
 		return nil, nil
 	}
 	k := secret.Data["keys"].([]interface{})

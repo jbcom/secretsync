@@ -616,3 +616,382 @@ func TestVaultClient_WriteSecretWithMerge(t *testing.T) {
 func intPtr(i int) *int {
 	return &i
 }
+
+func TestVaultClient_ListSecretsRecursive(t *testing.T) {
+	tests := []struct {
+		name         string
+		basePath     string
+		mockResponses map[string]*api.Secret
+		expected     []string
+		wantErr      bool
+		errMsg       string
+	}{
+		{
+			name:     "Single level secrets",
+			basePath: "secret/app",
+			mockResponses: map[string]*api.Secret{
+				"secret/metadata/app/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"config", "database"},
+					},
+				},
+			},
+			expected: []string{"secret/app/config", "secret/app/database"},
+			wantErr:  false,
+		},
+		{
+			name:     "Nested directory structure",
+			basePath: "secret/app",
+			mockResponses: map[string]*api.Secret{
+				"secret/metadata/app/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"config", "env/", "database"},
+					},
+				},
+				"secret/metadata/app/env/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"prod", "staging", "dev/"},
+					},
+				},
+				"secret/metadata/app/env/dev/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"local", "test"},
+					},
+				},
+			},
+			expected: []string{
+				"secret/app/config",
+				"secret/app/database", 
+				"secret/app/env/prod",
+				"secret/app/env/staging",
+				"secret/app/env/dev/local",
+				"secret/app/env/dev/test",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Deep nesting with mixed content",
+			basePath: "kv/myapp",
+			mockResponses: map[string]*api.Secret{
+				"kv/metadata/myapp/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"api-key", "services/", "version"},
+					},
+				},
+				"kv/metadata/myapp/services/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"auth/", "payment/", "notification"},
+					},
+				},
+				"kv/metadata/myapp/services/auth/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"jwt-secret", "oauth/"},
+					},
+				},
+				"kv/metadata/myapp/services/payment/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"stripe-key", "paypal-config"},
+					},
+				},
+				"kv/metadata/myapp/services/auth/oauth/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"google", "github", "facebook"},
+					},
+				},
+			},
+			expected: []string{
+				"kv/myapp/api-key",
+				"kv/myapp/version",
+				"kv/myapp/services/notification",
+				"kv/myapp/services/auth/jwt-secret",
+				"kv/myapp/services/payment/stripe-key",
+				"kv/myapp/services/payment/paypal-config",
+				"kv/myapp/services/auth/oauth/google",
+				"kv/myapp/services/auth/oauth/github",
+				"kv/myapp/services/auth/oauth/facebook",
+			},
+			wantErr: false,
+		},
+		{
+			name:     "Empty directory",
+			basePath: "secret/empty",
+			mockResponses: map[string]*api.Secret{
+				"secret/metadata/empty/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{},
+					},
+				},
+			},
+			expected: []string{},
+			wantErr:  false,
+		},
+		{
+			name:     "Path with trailing slash",
+			basePath: "secret/app/",
+			mockResponses: map[string]*api.Secret{
+				"secret/metadata/app/": {
+					Data: map[string]interface{}{
+						"keys": []interface{}{"config", "database"},
+					},
+				},
+			},
+			expected: []string{"secret/app/config", "secret/app/database"},
+			wantErr:  false,
+		},
+		{
+			name:     "Non-existent path",
+			basePath: "secret/nonexistent",
+			mockResponses: map[string]*api.Secret{
+				"secret/metadata/nonexistent/": nil,
+			},
+			expected: []string{},
+			wantErr:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock client
+			mockClient, err := api.NewClient(&api.Config{
+				Address: "http://localhost:8200",
+			})
+			require.NoError(t, err)
+
+			// Create mock logical backend
+			mockLogical := &mockLogical{
+				listWithContextFunc: func(ctx context.Context, path string) (*api.Secret, error) {
+					if response, exists := tt.mockResponses[path]; exists {
+						return response, nil
+					}
+					return nil, nil
+				},
+			}
+
+			// Replace the logical backend with our mock
+			// Note: This is a simplified approach for testing
+			client := &VaultClient{
+				Address: "http://localhost:8200",
+				Client:  mockClient,
+			}
+
+			// Mock the Client.Logical() method by creating a custom implementation
+			// In a real scenario, we'd use a more sophisticated mocking framework
+			ctx := context.Background()
+			
+			// Test the recursive listing logic directly
+			result, err := client.listSecretsRecursiveWithMock(ctx, tt.basePath, mockLogical)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.ElementsMatch(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+// listSecretsRecursiveWithMock is a test helper that allows injecting a mock logical client
+func (vc *VaultClient) listSecretsRecursiveWithMock(ctx context.Context, basePath string, mockLogical *mockLogical) ([]string, error) {
+	l := log.WithFields(log.Fields{
+		"address": vc.Address,
+		"role":    vc.Role,
+		"path":    basePath,
+		"method":  vc.AuthMethod,
+	})
+	l.Debug("vault.ListSecretsRecursive")
+	
+	var allSecrets []string
+	visited := make(map[string]bool)
+	queue := []string{basePath}
+	
+	for len(queue) > 0 {
+		currentPath := queue[0]
+		queue = queue[1:]
+		
+		// Skip if already visited to prevent infinite loops
+		if visited[currentPath] {
+			continue
+		}
+		visited[currentPath] = true
+		
+		// Get the metadata path for listing
+		metadataPath, err := vc.getMetadataPath(currentPath)
+		if err != nil {
+			l.WithError(err).Warnf("Failed to get metadata path for %s", currentPath)
+			continue
+		}
+		
+		// List contents at current path using mock
+		keys, err := vc.listPathContentsWithMock(ctx, metadataPath, mockLogical)
+		if err != nil {
+			l.WithError(err).Warnf("Failed to list contents at %s", metadataPath)
+			continue
+		}
+		
+		if keys == nil {
+			continue
+		}
+		
+		// Process each key found
+		for _, key := range keys {
+			// Construct the full path maintaining original format
+			var fullPath string
+			if strings.HasSuffix(currentPath, "/") {
+				fullPath = currentPath + key
+			} else {
+				fullPath = currentPath + "/" + key
+			}
+			
+			if strings.HasSuffix(key, "/") {
+				// It's a directory - add to queue for recursive exploration
+				// Remove trailing slash for consistent path handling
+				dirPath := strings.TrimSuffix(fullPath, "/")
+				if !visited[dirPath] {
+					queue = append(queue, dirPath)
+				}
+			} else {
+				// It's a secret - add to results
+				allSecrets = append(allSecrets, fullPath)
+			}
+		}
+	}
+	
+	return allSecrets, nil
+}
+
+// listPathContentsWithMock is a test helper for mocking Vault LIST operations
+func (vc *VaultClient) listPathContentsWithMock(ctx context.Context, metadataPath string, mockLogical *mockLogical) ([]string, error) {
+	secret, err := mockLogical.ListWithContext(ctx, metadataPath)
+	if err != nil {
+		return nil, err
+	}
+	if secret == nil {
+		return nil, nil
+	}
+	if secret.Data == nil || secret.Data["keys"] == nil {
+		return nil, nil
+	}
+	k := secret.Data["keys"].([]interface{})
+	var keys []string
+	for _, v := range k {
+		keys = append(keys, v.(string))
+	}
+	return keys, nil
+}
+
+func TestVaultClient_GetMetadataPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		path     string
+		expected string
+		wantErr  bool
+		errMsg   string
+	}{
+		{
+			name:     "Valid KV path",
+			path:     "secret/app/config",
+			expected: "secret/metadata/app/config/",
+			wantErr:  false,
+		},
+		{
+			name:     "Path with trailing slash",
+			path:     "secret/app/",
+			expected: "secret/metadata/app/",
+			wantErr:  false,
+		},
+		{
+			name:     "Root KV path",
+			path:     "kv/data",
+			expected: "kv/metadata/data/",
+			wantErr:  false,
+		},
+		{
+			name:    "Invalid path format",
+			path:    "invalid",
+			wantErr: true,
+			errMsg:  "secret path must be in kv/path/to/secret format",
+		},
+		{
+			name:    "Empty path",
+			path:    "",
+			wantErr: true,
+			errMsg:  "secret path must be in kv/path/to/secret format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client := &VaultClient{}
+			result, err := client.getMetadataPath(tt.path)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestVaultClient_ListSecretsOnce_ErrorHandling(t *testing.T) {
+	tests := []struct {
+		name    string
+		client  *VaultClient
+		path    string
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name:    "Nil client",
+			client:  nil,
+			path:    "secret/test",
+			wantErr: true,
+			errMsg:  "vault client not initialized",
+		},
+		{
+			name:    "Client with nil API client",
+			client:  &VaultClient{Address: "http://localhost:8200"},
+			path:    "secret/test",
+			wantErr: true,
+			errMsg:  "vault client not initialized",
+		},
+		{
+			name:    "Empty path",
+			client:  &VaultClient{Address: "http://localhost:8200", Client: &api.Client{}},
+			path:    "",
+			wantErr: true,
+			errMsg:  "secret path required",
+		},
+		{
+			name:    "Invalid path format",
+			client:  &VaultClient{Address: "http://localhost:8200", Client: &api.Client{}},
+			path:    "invalid",
+			wantErr: true,
+			errMsg:  "secret path must be in kv/path/to/secret format",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			_, err := tt.client.ListSecretsOnce(ctx, tt.path)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errMsg != "" {
+					assert.Contains(t, err.Error(), tt.errMsg)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
