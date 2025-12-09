@@ -1,4 +1,4 @@
-# vault-secret-sync Makefile
+# SecretSync Makefile
 
 .PHONY: all build test test-unit test-integration lint clean help
 
@@ -10,7 +10,7 @@ GOMOD=$(GOCMD) mod
 GOLINT=golangci-lint
 
 # Build info
-BINARY_NAME=vault-secret-sync
+BINARY_NAME=secretsync
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 all: lint test build
