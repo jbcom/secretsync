@@ -1,5 +1,5 @@
 # Go development environment for vault-secret-sync
-FROM golang:1.25.5-trixie
+FROM golang:1.23-bookworm
 
 WORKDIR /workspace
 
@@ -19,7 +19,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # =============================================================================
 # GOLANGCI-LINT
 # =============================================================================
-# Install latest golangci-lint for Go 1.25 compatibility
+# Install latest golangci-lint
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin latest && \
     golangci-lint --version
 

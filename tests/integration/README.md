@@ -26,7 +26,7 @@ The `docker-compose.test.yml` file in the project root defines a complete integr
 4. **Test Runner** - Executes Go integration tests
    - Waits for seeders to complete
    - Runs with proper environment variables
-   - Uses Go 1.25.5
+   - Uses Go 1.23
 
 ### Test Data
 
