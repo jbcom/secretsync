@@ -1,4 +1,4 @@
-// Package integration provides end-to-end tests for the FSC merge+sync pipeline.
+// Package integration provides end-to-end tests for the merge+sync pipeline.
 // These tests require LocalStack and Vault to be running (via docker-compose.test.yml).
 package integration
 
@@ -34,12 +34,12 @@ func skipIfNoIntegrationEnv(t *testing.T) {
 	}
 }
 
-// TestFSCMergePlusSyncPattern validates the complete FSC merge+sync workflow:
-// 1. Seed Vault with source secrets (simulating FSC pattern)
-// 2. Run merge phase (sources -> merge store with deepmerge)
-// 3. Run sync phase (merge store -> AWS Secrets Manager)
+// TestMergeSyncPipeline validates the complete merge+sync workflow:
+// 1. Seed Vault with source secrets
+// 2. Run merge phase (sources -> merged output with deepmerge)
+// 3. Run sync phase (merged output -> AWS Secrets Manager)
 // 4. Validate final secrets match expected merged output
-func TestFSCMergePlusSyncPattern(t *testing.T) {
+func TestMergeSyncPipeline(t *testing.T) {
 	skipIfNoIntegrationEnv(t)
 
 	ctx := context.Background()
@@ -48,7 +48,7 @@ func TestFSCMergePlusSyncPattern(t *testing.T) {
 	vaultClient := setupVaultClient(t)
 	awsClient := setupAWSClient(t, ctx)
 
-	// Step 1: Seed Vault with FSC-style source secrets
+	// Step 1: Seed Vault with source secrets
 	seedVaultSecrets(t, vaultClient)
 
 	// Step 2: Validate Vault secrets were created correctly
@@ -104,7 +104,7 @@ func setupAWSClient(t *testing.T, ctx context.Context) *secretsmanager.Client {
 	})
 }
 
-// seedVaultSecrets creates test secrets in Vault that simulate FSC pattern
+// seedVaultSecrets creates test secrets in Vault simulating multi-source pattern
 func seedVaultSecrets(t *testing.T, client *api.Client) {
 	t.Helper()
 
@@ -113,32 +113,32 @@ func seedVaultSecrets(t *testing.T, client *api.Client) {
 		Type: "kv-v2",
 	})
 
-	// Source 1: analytics - base configuration
-	writeVaultSecret(t, client, "secret/data/analytics/database", map[string]interface{}{
+	// Source 1: base configuration
+	writeVaultSecret(t, client, "secret/data/base/database", map[string]interface{}{
 		"data": map[string]interface{}{
-			"host":     "analytics-db.example.com",
+			"host":     "db.example.com",
 			"port":     5432,
 			"users":    []interface{}{"readonly", "admin"},
 			"settings": map[string]interface{}{"timeout": 30, "pool_size": 10},
 		},
 	})
 
-	writeVaultSecret(t, client, "secret/data/analytics/api-keys", map[string]interface{}{
+	writeVaultSecret(t, client, "secret/data/base/api-keys", map[string]interface{}{
 		"data": map[string]interface{}{
-			"stripe":   "sk_test_analytics",
-			"sendgrid": "SG.analytics",
+			"stripe":   "sk_test_base",
+			"sendgrid": "SG.base",
 		},
 	})
 
-	// Source 2: analytics-engineers - environment-specific overrides
-	writeVaultSecret(t, client, "secret/data/analytics-engineers/database", map[string]interface{}{
+	// Source 2: environment-specific overrides
+	writeVaultSecret(t, client, "secret/data/overrides/database", map[string]interface{}{
 		"data": map[string]interface{}{
-			"users":    []interface{}{"engineer1", "engineer2"}, // Should APPEND to analytics users
-			"settings": map[string]interface{}{"debug": true},   // Should MERGE into analytics settings
+			"users":    []interface{}{"dev1", "dev2"},       // Should APPEND to base users
+			"settings": map[string]interface{}{"debug": true}, // Should MERGE into base settings
 		},
 	})
 
-	// Source 3: shared - common secrets
+	// Source 3: shared secrets
 	writeVaultSecret(t, client, "secret/data/shared/common", map[string]interface{}{
 		"data": map[string]interface{}{
 			"region":      "us-east-1",
@@ -147,13 +147,13 @@ func seedVaultSecrets(t *testing.T, client *api.Client) {
 	})
 
 	// Nested secrets (for recursive listing validation)
-	writeVaultSecret(t, client, "secret/data/analytics/nested/level1/config", map[string]interface{}{
+	writeVaultSecret(t, client, "secret/data/base/nested/level1/config", map[string]interface{}{
 		"data": map[string]interface{}{
 			"nested_key": "nested_value",
 		},
 	})
 
-	t.Log("Seeded Vault with FSC-style test secrets")
+	t.Log("Seeded Vault with test secrets")
 }
 
 func writeVaultSecret(t *testing.T, client *api.Client, path string, data map[string]interface{}) {
@@ -165,24 +165,24 @@ func writeVaultSecret(t *testing.T, client *api.Client, path string, data map[st
 func validateVaultSecrets(t *testing.T, client *api.Client) {
 	t.Helper()
 
-	// Validate analytics/database exists
-	secret, err := client.Logical().Read("secret/data/analytics/database")
+	// Validate base/database exists
+	secret, err := client.Logical().Read("secret/data/base/database")
 	require.NoError(t, err)
 	require.NotNil(t, secret)
 
 	data := secret.Data["data"].(map[string]interface{})
-	assert.Equal(t, "analytics-db.example.com", data["host"])
+	assert.Equal(t, "db.example.com", data["host"])
 
 	// Validate nested secret exists (tests recursive listing)
-	nested, err := client.Logical().Read("secret/data/analytics/nested/level1/config")
+	nested, err := client.Logical().Read("secret/data/base/nested/level1/config")
 	require.NoError(t, err)
 	require.NotNil(t, nested)
 
 	t.Log("Validated Vault secrets exist")
 }
 
-// runMergePhase simulates the FSC merge pattern:
-// Target "Stg" imports: analytics, analytics-engineers, shared
+// runMergePhase simulates the merge pattern:
+// Target imports: base, overrides, shared
 // Expected: deepmerge with list append, dict merge
 func runMergePhase(t *testing.T, client *api.Client) map[string]map[string]interface{} {
 	t.Helper()
@@ -190,19 +190,19 @@ func runMergePhase(t *testing.T, client *api.Client) map[string]map[string]inter
 	merged := make(map[string]map[string]interface{})
 
 	// Read all source secrets
-	analyticsDB := readVaultSecretData(t, client, "secret/data/analytics/database")
-	analyticsAPI := readVaultSecretData(t, client, "secret/data/analytics/api-keys")
-	engineersDB := readVaultSecretData(t, client, "secret/data/analytics-engineers/database")
+	baseDB := readVaultSecretData(t, client, "secret/data/base/database")
+	baseAPI := readVaultSecretData(t, client, "secret/data/base/api-keys")
+	overridesDB := readVaultSecretData(t, client, "secret/data/overrides/database")
 	shared := readVaultSecretData(t, client, "secret/data/shared/common")
-	nested := readVaultSecretData(t, client, "secret/data/analytics/nested/level1/config")
+	nested := readVaultSecretData(t, client, "secret/data/base/nested/level1/config")
 
 	// Simulate deepmerge for database config
-	// analytics/database + analytics-engineers/database
-	mergedDB := deepMergeSimple(analyticsDB, engineersDB)
+	// base/database + overrides/database
+	mergedDB := deepMerge(baseDB, overridesDB)
 	merged["database"] = mergedDB
 
 	// api-keys pass through (no merge needed)
-	merged["api-keys"] = analyticsAPI
+	merged["api-keys"] = baseAPI
 
 	// shared pass through
 	merged["common"] = shared
@@ -211,14 +211,14 @@ func runMergePhase(t *testing.T, client *api.Client) map[string]map[string]inter
 	merged["nested/level1/config"] = nested
 
 	// Validate merge results
-	// Users should be: ["readonly", "admin", "engineer1", "engineer2"] (list append)
+	// Users should be: ["readonly", "admin", "dev1", "dev2"] (list append)
 	users := mergedDB["users"].([]interface{})
 	assert.Len(t, users, 4, "Expected 4 users after list append merge")
 
 	// Settings should have both timeout/pool_size AND debug (dict merge)
 	settings := mergedDB["settings"].(map[string]interface{})
-	assert.Contains(t, settings, "timeout", "Expected timeout from analytics")
-	assert.Contains(t, settings, "debug", "Expected debug from engineers")
+	assert.Contains(t, settings, "timeout", "Expected timeout from base")
+	assert.Contains(t, settings, "debug", "Expected debug from overrides")
 
 	t.Log("Merge phase completed with deepmerge validation")
 	return merged
@@ -232,9 +232,11 @@ func readVaultSecretData(t *testing.T, client *api.Client, path string) map[stri
 	return secret.Data["data"].(map[string]interface{})
 }
 
-// deepMergeSimple is a simplified deepmerge for testing
-// Production code uses pkg/utils/deepmerge.go
-func deepMergeSimple(dst, src map[string]interface{}) map[string]interface{} {
+// deepMerge implements the merge strategy:
+// - Lists: append
+// - Dicts: recursive merge
+// - Scalars: override
+func deepMerge(dst, src map[string]interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 
 	// Copy dst
@@ -255,7 +257,7 @@ func deepMergeSimple(dst, src map[string]interface{}) map[string]interface{} {
 			// Handle dict merge
 			if dstMap, ok := existing.(map[string]interface{}); ok {
 				if srcMap, ok := v.(map[string]interface{}); ok {
-					result[k] = deepMergeSimple(dstMap, srcMap)
+					result[k] = deepMerge(dstMap, srcMap)
 					continue
 				}
 			}
@@ -272,7 +274,7 @@ func runSyncPhase(t *testing.T, ctx context.Context, client *secretsmanager.Clie
 	t.Helper()
 
 	for name, data := range secrets {
-		secretName := "fsc-test/" + name
+		secretName := "test-sync/" + name
 		secretValue, err := json.Marshal(data)
 		require.NoError(t, err)
 
@@ -299,7 +301,7 @@ func validateAWSSecrets(t *testing.T, ctx context.Context, client *secretsmanage
 	t.Helper()
 
 	for name, expectedData := range expected {
-		secretName := "fsc-test/" + name
+		secretName := "test-sync/" + name
 
 		result, err := client.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
 			SecretId: aws.String(secretName),
@@ -311,7 +313,7 @@ func validateAWSSecrets(t *testing.T, ctx context.Context, client *secretsmanage
 		require.NoError(t, err)
 
 		// Validate key fields
-		for key, expectedVal := range expectedData {
+		for key := range expectedData {
 			assert.Contains(t, actualData, key, "Expected key %s in AWS secret %s", key, name)
 		}
 
@@ -327,8 +329,8 @@ func cleanup(t *testing.T, ctx context.Context, vaultClient *api.Client, awsClie
 
 	// Delete Vault secrets
 	paths := []string{
-		"secret/metadata/analytics",
-		"secret/metadata/analytics-engineers",
+		"secret/metadata/base",
+		"secret/metadata/overrides",
 		"secret/metadata/shared",
 	}
 	for _, path := range paths {
@@ -337,10 +339,10 @@ func cleanup(t *testing.T, ctx context.Context, vaultClient *api.Client, awsClie
 
 	// Delete AWS secrets
 	secretNames := []string{
-		"fsc-test/database",
-		"fsc-test/api-keys",
-		"fsc-test/common",
-		"fsc-test/nested/level1/config",
+		"test-sync/database",
+		"test-sync/api-keys",
+		"test-sync/common",
+		"test-sync/nested/level1/config",
 	}
 	for _, name := range secretNames {
 		awsClient.DeleteSecret(ctx, &secretsmanager.DeleteSecretInput{
@@ -356,7 +358,6 @@ func cleanup(t *testing.T, ctx context.Context, vaultClient *api.Client, awsClie
 func TestRecursiveVaultListing(t *testing.T) {
 	skipIfNoIntegrationEnv(t)
 
-	ctx := context.Background()
 	vaultClient := setupVaultClient(t)
 
 	// Create nested structure
@@ -430,7 +431,7 @@ func listVaultSecretsRecursive(t *testing.T, client *api.Client, basePath string
 	return allSecrets
 }
 
-// TestDeepMergeStrategies validates the FSC deepmerge behavior
+// TestDeepMergeStrategies validates the deepmerge behavior
 func TestDeepMergeStrategies(t *testing.T) {
 	// This test doesn't need emulators - it validates the merge logic
 
@@ -442,7 +443,7 @@ func TestDeepMergeStrategies(t *testing.T) {
 			"users": []interface{}{"charlie"},
 		}
 
-		result := deepMergeSimple(dst, src)
+		result := deepMerge(dst, src)
 		users := result["users"].([]interface{})
 
 		assert.Len(t, users, 3)
@@ -464,7 +465,7 @@ func TestDeepMergeStrategies(t *testing.T) {
 			},
 		}
 
-		result := deepMergeSimple(dst, src)
+		result := deepMerge(dst, src)
 		config := result["config"].(map[string]interface{})
 
 		assert.Equal(t, 30, config["timeout"])
@@ -480,12 +481,12 @@ func TestDeepMergeStrategies(t *testing.T) {
 			"version": "2.0",
 		}
 
-		result := deepMergeSimple(dst, src)
+		result := deepMerge(dst, src)
 		assert.Equal(t, "2.0", result["version"])
 	})
 }
 
-// TestTargetInheritanceChain validates Stg -> Prod -> Demo inheritance
+// TestTargetInheritanceChain validates inheritance resolution
 func TestTargetInheritanceChain(t *testing.T) {
 	// This test validates the inheritance resolution logic
 	// without needing emulators
@@ -494,24 +495,24 @@ func TestTargetInheritanceChain(t *testing.T) {
 		imports  []string
 		inherits string
 	}{
-		"Stg":  {imports: []string{"analytics", "shared"}, inherits: ""},
-		"Prod": {imports: []string{"Stg"}, inherits: "Stg"},           // Inherits from Stg
-		"Demo": {imports: []string{"Prod"}, inherits: "Prod"},         // Inherits from Prod
+		"staging":    {imports: []string{"base", "shared"}, inherits: ""},
+		"production": {imports: []string{"staging"}, inherits: "staging"},
+		"demo":       {imports: []string{"production"}, inherits: "production"},
 	}
 
 	// Validate inheritance detection
-	assert.Empty(t, targets["Stg"].inherits, "Stg should not inherit")
-	assert.Equal(t, "Stg", targets["Prod"].inherits, "Prod should inherit from Stg")
-	assert.Equal(t, "Prod", targets["Demo"].inherits, "Demo should inherit from Prod")
+	assert.Empty(t, targets["staging"].inherits, "staging should not inherit")
+	assert.Equal(t, "staging", targets["production"].inherits, "production should inherit from staging")
+	assert.Equal(t, "production", targets["demo"].inherits, "demo should inherit from production")
 
 	// Validate topological order (dependencies resolved first)
-	order := []string{"Stg", "Prod", "Demo"}
+	order := []string{"staging", "production", "demo"}
 	for i, target := range order {
 		if targets[target].inherits != "" {
 			// Find parent in order
 			parentIdx := -1
-			for j, t := range order {
-				if t == targets[target].inherits {
+			for j, tgt := range order {
+				if tgt == targets[target].inherits {
 					parentIdx = j
 					break
 				}
