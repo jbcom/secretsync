@@ -1,6 +1,9 @@
 package observability
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,5 +200,50 @@ func TestMetricsSubsystems(t *testing.T) {
 		if expected != actual {
 			t.Errorf("Expected subsystem '%s', got '%s'", expected, actual)
 		}
+	}
+}
+
+func TestMetricsHandler(t *testing.T) {
+	// Test that Handler returns a valid HTTP handler
+	handler := Handler()
+	if handler == nil {
+		t.Fatal("Handler() returned nil")
+	}
+
+	// Record some metrics to ensure they're exposed
+	VaultAPICallDuration.WithLabelValues("test_op", "success").Observe(0.1)
+	AWSAPICallDuration.WithLabelValues("test_op", "us-east-1", "success").Observe(0.2)
+	PipelineExecutionDuration.WithLabelValues("merge", "pipeline").Observe(1.0)
+
+	// Create a test request
+	req, err := http.NewRequest("GET", "/metrics", nil)
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
+	// Create a response recorder
+	rr := httptest.NewRecorder()
+
+	// Serve the request
+	handler.ServeHTTP(rr, req)
+
+	// Verify response
+	if rr.Code != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", rr.Code)
+	}
+
+	// Verify response contains Prometheus metrics format
+	body := rr.Body.String()
+	if !strings.Contains(body, "# HELP") {
+		t.Error("Response does not contain Prometheus format")
+	}
+	if !strings.Contains(body, "secretsync_vault_api_call_duration_seconds") {
+		t.Error("Response does not contain Vault metrics")
+	}
+	if !strings.Contains(body, "secretsync_aws_api_call_duration_seconds") {
+		t.Error("Response does not contain AWS metrics")
+	}
+	if !strings.Contains(body, "secretsync_pipeline_execution_duration_seconds") {
+		t.Error("Response does not contain Pipeline metrics")
 	}
 }
