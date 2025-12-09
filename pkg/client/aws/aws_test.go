@@ -368,7 +368,7 @@ func TestAwsClient_ConcurrentMapAccess(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	// Simulate concurrent writes to accountSecretArns (like ListSecrets does)
+	// Simulate concurrent write operations to accountSecretArns (like ListSecrets does)
 	for i := 0; i < numWriters; i++ {
 		wg.Add(1)
 		go func(writerID int) {
@@ -419,10 +419,12 @@ func TestAwsClient_DeepCopyConcurrentSafety(t *testing.T) {
 		accountSecretArns: make(map[string]string),
 	}
 
-	// Populate initial data
+	// Populate initial data with mutex protection
+	original.arnMu.Lock()
 	for i := 0; i < 100; i++ {
 		original.accountSecretArns[fmt.Sprintf("secret-%d", i)] = fmt.Sprintf("arn-%d", i)
 	}
+	original.arnMu.Unlock()
 
 	const numCopiers = 20
 	var wg sync.WaitGroup
