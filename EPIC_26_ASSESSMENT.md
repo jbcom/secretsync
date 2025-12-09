@@ -224,7 +224,7 @@
 
 3. ✅ **CI green on all platforms**
    - All tests passing
-   - Go 1.23 standardized
+   - Go 1.25.5 standardized
    - docker-compose integration tests working
 
 4. ⏳ **v1.0.0 tag created**
