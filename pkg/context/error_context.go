@@ -82,7 +82,7 @@ if b.retryCount > 0 {
 errMsg += fmt.Sprintf(" retries=%d", b.retryCount)
 }
 
-errMsg += fmt.Sprintf(" duration=%dms", duration.Milliseconds())
+errMsg += fmt.Sprintf(" duration=%s", formatDuration(duration))
 
 if errMsg != "" {
 errMsg += ": "
@@ -120,5 +120,19 @@ DurationMs:  duration.Milliseconds(),
 RetryCount:  b.retryCount,
 StartedAt:   b.startTime,
 FailedAt:    time.Now(),
+}
+}
+
+// formatDuration formats duration intelligently based on magnitude
+func formatDuration(d time.Duration) string {
+switch {
+case d < time.Microsecond:
+return fmt.Sprintf("%dns", d.Nanoseconds())
+case d < time.Millisecond:
+return fmt.Sprintf("%dµs", d.Microseconds())
+case d < time.Second:
+return fmt.Sprintf("%dms", d.Milliseconds())
+default:
+return fmt.Sprintf("%.2fs", d.Seconds())
 }
 }

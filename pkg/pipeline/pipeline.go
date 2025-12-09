@@ -191,7 +191,7 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) ([]Result, error) {
 	// Generate request ID and add to context
 	reqCtx := reqctx.NewRequestContext()
 	ctx = reqctx.WithRequestContext(ctx, reqCtx)
-	
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
