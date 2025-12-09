@@ -14,11 +14,12 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/identitystore v1.34.5
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.49.2
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.80.1
-	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.40.2
+	github.com/aws/aws-sdk-go-v2/service/secretsmanager v1.40.4
 	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.17
 	github.com/aws/aws-sdk-go-v2/service/ssm v1.67.6
 	github.com/aws/aws-sdk-go-v2/service/ssoadmin v1.36.10
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.2
+	github.com/aws/smithy-go v1.24.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-redis/redis v6.15.9+incompatible
 	github.com/google/go-github/v62 v62.0.0
@@ -72,7 +73,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/signin v1.0.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.10 // indirect
-	github.com/aws/smithy-go v1.24.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
