@@ -139,6 +139,26 @@ func (c *Config) Validate() error {
 		if dt.Discovery.IdentityCenter == nil && dt.Discovery.Organizations == nil && dt.Discovery.AccountsList == nil {
 			return fmt.Errorf("dynamic_target %q: must specify identity_center, organizations, or accounts_list discovery", name)
 		}
+		// Validate name matching config if present
+		if dt.Discovery.Organizations != nil && dt.Discovery.Organizations.NameMatching != nil {
+			nm := dt.Discovery.Organizations.NameMatching
+			if nm.Strategy != "" && nm.Strategy != "exact" && nm.Strategy != "fuzzy" && nm.Strategy != "loose" {
+				return fmt.Errorf("dynamic_target %q: invalid name_matching.strategy %q (must be exact, fuzzy, or loose)", name, nm.Strategy)
+			}
+		}
+		// Validate account_name_patterns if present
+		for i, pattern := range dt.AccountNamePatterns {
+			if pattern.Pattern == "" {
+				return fmt.Errorf("dynamic_target %q: account_name_patterns[%d].pattern is required", name, i)
+			}
+			if pattern.Target == "" {
+				return fmt.Errorf("dynamic_target %q: account_name_patterns[%d].target is required", name, i)
+			}
+			// Validate regex compiles
+			if _, err := regexp.Compile(pattern.Pattern); err != nil {
+				return fmt.Errorf("dynamic_target %q: account_name_patterns[%d].pattern is invalid regex: %w", name, i, err)
+			}
+		}
 	}
 
 	return nil

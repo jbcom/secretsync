@@ -204,6 +204,9 @@ type DynamicTarget struct {
 	Imports   []string        `mapstructure:"imports" yaml:"imports"`
 	Exclude   []string        `mapstructure:"exclude" yaml:"exclude"`
 
+	// AccountNamePatterns maps discovered accounts to specific targets using regex
+	AccountNamePatterns []AccountNamePattern `mapstructure:"account_name_patterns" yaml:"account_name_patterns"`
+
 	Region       string `mapstructure:"region" yaml:"region"`
 	SecretPrefix string `mapstructure:"secret_prefix" yaml:"secret_prefix"`
 	RoleARN      string `mapstructure:"role_arn" yaml:"role_arn"`
@@ -224,9 +227,42 @@ type IdentityCenterDiscovery struct {
 
 // OrganizationsDiscovery discovers accounts from AWS Organizations
 type OrganizationsDiscovery struct {
-	OU        string            `mapstructure:"ou" yaml:"ou"`
-	Tags      map[string]string `mapstructure:"tags" yaml:"tags"`
-	Recursive bool              `mapstructure:"recursive" yaml:"recursive"`
+	OU           string              `mapstructure:"ou" yaml:"ou"`
+	Tags         map[string][]string `mapstructure:"tags" yaml:"tags"`
+	Recursive    bool                `mapstructure:"recursive" yaml:"recursive"`
+	NameMatching *NameMatchingConfig `mapstructure:"name_matching" yaml:"name_matching"`
+}
+
+// NameMatchingConfig configures fuzzy account name matching
+type NameMatchingConfig struct {
+	// Strategy: "exact", "fuzzy", or "loose" (default: "exact")
+	// - exact: names must match exactly (case-insensitive by default)
+	// - fuzzy: partial substring matching with normalization
+	// - loose: most permissive, applies all normalizations
+	Strategy string `mapstructure:"strategy" yaml:"strategy"`
+
+	// NormalizeKeys: apply JSON key normalization (default: false)
+	// Converts underscores to hyphens, removes special chars
+	NormalizeKeys bool `mapstructure:"normalize_keys" yaml:"normalize_keys"`
+
+	// CaseInsensitive: case-insensitive matching (default: true)
+	CaseInsensitive bool `mapstructure:"case_insensitive" yaml:"case_insensitive"`
+
+	// StripPrefixes: prefixes to remove before matching
+	// Common values: ["aws-", "fsc-", "org-"]
+	StripPrefixes []string `mapstructure:"strip_prefixes" yaml:"strip_prefixes"`
+
+	// StripSuffixes: suffixes to remove before matching
+	// Common values: ["-account", "-acct"]
+	StripSuffixes []string `mapstructure:"strip_suffixes" yaml:"strip_suffixes"`
+}
+
+// AccountNamePattern maps discovered accounts to targets
+type AccountNamePattern struct {
+	// Pattern is a regex pattern to match against normalized account names
+	Pattern string `mapstructure:"pattern" yaml:"pattern"`
+	// Target is the target name to use when pattern matches
+	Target string `mapstructure:"target" yaml:"target"`
 }
 
 // AccountsListDiscovery discovers accounts from an external source

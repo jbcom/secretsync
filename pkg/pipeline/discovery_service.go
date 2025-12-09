@@ -73,6 +73,12 @@ func (d *DiscoveryService) DiscoverTargets() (map[string]Target, error) {
 		// Deduplicate accounts
 		accounts = deduplicateAccounts(accounts)
 
+		// Initialize name matcher for fuzzy matching if configured
+		var nameMatcher *NameMatcher
+		if dynamicTarget.Discovery.Organizations != nil && dynamicTarget.Discovery.Organizations.NameMatching != nil {
+			nameMatcher = NewNameMatcher(dynamicTarget.Discovery.Organizations.NameMatching)
+		}
+
 		// Convert discovered accounts to targets
 		for _, acct := range accounts {
 			// Check exclusions
@@ -104,18 +110,31 @@ func (d *DiscoveryService) DiscoverTargets() (map[string]Target, error) {
 				roleARN = strings.ReplaceAll(roleARN, "{{.AccountID}}", acct.ID)
 			}
 
+			// Resolve imports using fuzzy matching if patterns configured
+			imports := dynamicTarget.Imports
+			if nameMatcher != nil && len(dynamicTarget.AccountNamePatterns) > 0 {
+				imports = nameMatcher.ResolveAccountImports(
+					acct,
+					dynamicTarget.AccountNamePatterns,
+					dynamicTarget.Imports,
+					d.config.Targets,
+				)
+			}
+
 			discoveredTargets[targetName] = Target{
 				AccountID:    acct.ID,
-				Imports:      dynamicTarget.Imports,
+				Imports:      imports,
 				Region:       region,
 				SecretPrefix: dynamicTarget.SecretPrefix,
 				RoleARN:      roleARN,
 			}
 
 			l.WithFields(log.Fields{
-				"targetName": targetName,
-				"accountID":  acct.ID,
-				"region":     region,
+				"targetName":    targetName,
+				"accountID":     acct.ID,
+				"region":        region,
+				"importsCount":  len(imports),
+				"fuzzyMatching": nameMatcher != nil,
 			}).Debug("Discovered target")
 		}
 	}

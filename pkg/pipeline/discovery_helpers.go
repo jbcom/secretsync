@@ -132,15 +132,32 @@ func deduplicateAccounts(accounts []AccountInfo) []AccountInfo {
 	return result
 }
 
-func filterAccountsByTags(accounts []AccountInfo, requiredTags map[string]string) []AccountInfo {
+// filterAccountsByTags filters accounts that match ALL required tag conditions.
+// Tags support multiple values per key - an account matches if it has ANY of the values.
+// Example: Tags{"Environment": ["staging", "sandbox"]} matches accounts with
+// Environment=staging OR Environment=sandbox
+func filterAccountsByTags(accounts []AccountInfo, requiredTags map[string][]string) []AccountInfo {
 	var result []AccountInfo
 	for _, a := range accounts {
 		if a.Tags == nil {
 			continue
 		}
 		matches := true
-		for k, v := range requiredTags {
-			if a.Tags[k] != v {
+		for tagKey, allowedValues := range requiredTags {
+			accountTagValue, hasTag := a.Tags[tagKey]
+			if !hasTag {
+				matches = false
+				break
+			}
+			// Check if account's tag value is in the allowed values list
+			valueMatches := false
+			for _, allowed := range allowedValues {
+				if strings.EqualFold(accountTagValue, allowed) {
+					valueMatches = true
+					break
+				}
+			}
+			if !valueMatches {
 				matches = false
 				break
 			}

@@ -49,8 +49,10 @@ targets:
     imports:
       - Production  # Inherits ALL secrets from Production
 
-# Dynamic targets (sandbox accounts)
+# Dynamic targets - discovered via AWS Organizations
+# Uses fuzzy matching on account names for target resolution
 dynamic_targets:
+  # Sandbox accounts discovered via Identity Center permission sets
   engineer_sandboxes:
     discovery:
       identity_center:
@@ -61,6 +63,46 @@ dynamic_targets:
       - data-engineers
     exclude:
       - "222222222222"  # Exclude production
+  
+  # Development accounts discovered from Organizations OU
+  dev_accounts:
+    discovery:
+      organizations:
+        ou: "ou-xxxx-development"
+        recursive: true
+        # Fuzzy match account names to target configs
+        name_matching:
+          strategy: fuzzy           # loose/fuzzy/exact
+          normalize_keys: true      # JSON key normalization
+          case_insensitive: true
+    imports:
+      - analytics
+      - data-engineers
+    # Map discovered accounts to targets using fuzzy name matching
+    account_name_patterns:
+      - pattern: ".*-staging$"
+        target: Staging
+      - pattern: ".*-prod(uction)?$"
+        target: Production
+      - pattern: ".*-demo$"
+        target: Demo
+  
+  # All member accounts with tag-based filtering
+  tagged_accounts:
+    discovery:
+      organizations:
+        tags:
+          Environment: ["sandbox", "development"]
+          Team: ["analytics", "data-engineering"]
+        # Fuzzy matching for account name → target resolution
+        name_matching:
+          strategy: loose           # Normalize and fuzzy match
+          normalize_keys: true
+          strip_prefixes: ["aws-", "fsc-", "org-"]
+          strip_suffixes: ["-account", "-acct"]
+    imports:
+      - shared
+      - analytics
 
 # Pipeline settings
 pipeline:

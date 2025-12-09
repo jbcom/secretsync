@@ -73,7 +73,7 @@ func TestFilterAccountsByTagsWithNilTags(t *testing.T) {
 		},
 	}
 
-	result := filterAccountsByTags(accounts, map[string]string{"Environment": "production"})
+	result := filterAccountsByTags(accounts, map[string][]string{"Environment": {"production"}})
 
 	// Only the account with matching tags should be returned
 	assert.Len(t, result, 1)
@@ -109,9 +109,9 @@ func TestFilterAccountsByTagsPartialMatch(t *testing.T) {
 	}
 
 	// Require both tags to match
-	result := filterAccountsByTags(accounts, map[string]string{
-		"Environment": "production",
-		"Team":        "platform",
+	result := filterAccountsByTags(accounts, map[string][]string{
+		"Environment": {"production"},
+		"Team":        {"platform"},
 	})
 
 	// Only the account with both matching tags should be returned
@@ -122,24 +122,25 @@ func TestFilterAccountsByTagsPartialMatch(t *testing.T) {
 // TestOrganizationsDiscoveryTagFiltering tests the tag filtering in discovery
 func TestOrganizationsDiscoveryTagFiltering(t *testing.T) {
 	// Test the discovery config parsing and tag filtering logic
+	// Tags now support multiple values per key for OR matching
 	cfg := &OrganizationsDiscovery{
-		Tags: map[string]string{
-			"Environment": "production",
-			"CostCenter":  "engineering",
+		Tags: map[string][]string{
+			"Environment": {"production", "staging"},
+			"CostCenter":  {"engineering"},
 		},
 	}
 
 	assert.NotNil(t, cfg.Tags)
 	assert.Equal(t, 2, len(cfg.Tags))
-	assert.Equal(t, "production", cfg.Tags["Environment"])
-	assert.Equal(t, "engineering", cfg.Tags["CostCenter"])
+	assert.ElementsMatch(t, []string{"production", "staging"}, cfg.Tags["Environment"])
+	assert.ElementsMatch(t, []string{"engineering"}, cfg.Tags["CostCenter"])
 }
 
 // TestDiscoveryWithTagsAndOU tests discovery configuration with both OU and tags
 func TestDiscoveryWithTagsAndOU(t *testing.T) {
 	cfg := &OrganizationsDiscovery{
 		OU:        "ou-abc-12345678",
-		Tags:      map[string]string{"Environment": "production"},
+		Tags:      map[string][]string{"Environment": {"production"}},
 		Recursive: true,
 	}
 
@@ -147,18 +148,19 @@ func TestDiscoveryWithTagsAndOU(t *testing.T) {
 	assert.Equal(t, "ou-abc-12345678", cfg.OU)
 	assert.True(t, cfg.Recursive)
 	assert.NotNil(t, cfg.Tags)
-	assert.Equal(t, "production", cfg.Tags["Environment"])
+	assert.ElementsMatch(t, []string{"production"}, cfg.Tags["Environment"])
 }
 
 // TestDiscoveryWithTagsOnly tests discovery configuration with only tags (no OU)
 func TestDiscoveryWithTagsOnly(t *testing.T) {
 	cfg := &OrganizationsDiscovery{
-		Tags: map[string]string{"Environment": "sandbox"},
+		Tags: map[string][]string{"Environment": {"sandbox", "development"}},
 	}
 
 	// When no OU is specified, all accounts should be listed and filtered by tags
+	// Now supports multiple values per tag for OR matching
 	assert.Equal(t, "", cfg.OU)
 	assert.False(t, cfg.Recursive)
 	assert.NotNil(t, cfg.Tags)
-	assert.Equal(t, "sandbox", cfg.Tags["Environment"])
+	assert.ElementsMatch(t, []string{"sandbox", "development"}, cfg.Tags["Environment"])
 }
