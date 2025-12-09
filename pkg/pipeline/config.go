@@ -408,7 +408,7 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate no circular dependencies in target inheritance
-	if err := c.validateTargetInheritance(); err != nil {
+	if err := c.ValidateTargetInheritance(); err != nil {
 		return err
 	}
 
@@ -422,8 +422,8 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// validateTargetInheritance checks for circular dependencies in target inheritance chains
-func (c *Config) validateTargetInheritance() error {
+// ValidateTargetInheritance checks for circular dependencies in target inheritance chains
+func (c *Config) ValidateTargetInheritance() error {
 	// For each target, perform DFS to detect cycles
 	for name := range c.Targets {
 		visited := make(map[string]bool)
@@ -536,47 +536,6 @@ func (c *Config) IsInheritedTarget(targetName string) bool {
 		}
 	}
 	return false
-}
-
-// ValidateTargetInheritance checks for circular dependencies in target inheritance
-func (c *Config) ValidateTargetInheritance() error {
-	// Build dependency graph
-	for targetName := range c.Targets {
-		visited := make(map[string]bool)
-		inStack := make(map[string]bool)
-		if err := c.detectCycle(targetName, visited, inStack); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// detectCycle performs DFS to detect circular dependencies
-func (c *Config) detectCycle(targetName string, visited, inStack map[string]bool) error {
-	if inStack[targetName] {
-		return fmt.Errorf("circular dependency detected: target '%s' creates a cycle", targetName)
-	}
-	if visited[targetName] {
-		return nil
-	}
-
-	visited[targetName] = true
-	inStack[targetName] = true
-
-	target, ok := c.Targets[targetName]
-	if ok {
-		for _, imp := range target.Imports {
-			// Only check imports that are targets (inheritance)
-			if _, isTarget := c.Targets[imp]; isTarget {
-				if err := c.detectCycle(imp, visited, inStack); err != nil {
-					return err
-				}
-			}
-		}
-	}
-
-	inStack[targetName] = false
-	return nil
 }
 
 // GetSourcePath returns the full path for a source or inherited target
