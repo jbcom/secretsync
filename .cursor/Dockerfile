@@ -6,9 +6,19 @@ WORKDIR /workspace
 # =============================================================================
 # SHELL CONFIGURATION
 # =============================================================================
-# Define stub for dump_bash_state to prevent "command not found" noise
-# See: https://www.commandlinefu.com/commands/view/11427
-RUN echo 'dump_bash_state() { :; }' >> /etc/bash.bashrc
+# dump_bash_state - dumps bash command history from an active shell process
+# Useful for debugging. See: https://www.commandlinefu.com/commands/view/11427
+# Requires gdb to be installed
+RUN echo 'dump_bash_state() { \
+  local pid="${1:-$$}"; \
+  local outfile="/tmp/bash_history-${pid}.txt"; \
+  if command -v gdb &>/dev/null; then \
+    gdb -batch --eval "attach $pid" --eval "call write_history(\"$outfile\")" --eval "detach" --eval "q" 2>/dev/null && \
+    echo "History dumped to $outfile"; \
+  else \
+    echo "gdb not installed - cannot dump bash state"; \
+  fi; \
+}' >> /etc/bash.bashrc
 
 # =============================================================================
 # SYSTEM DEPENDENCIES
@@ -26,6 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     curl \
     wget \
+    # Debugging
+    gdb \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
