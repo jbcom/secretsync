@@ -10,6 +10,7 @@ package circuitbreaker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -178,14 +179,15 @@ func ExecuteTyped[T any](cb *CircuitBreaker, ctx context.Context, fn func(contex
 }
 
 // WrapError wraps an error with circuit breaker information
+// Uses errors.Is to properly detect wrapped circuit breaker errors
 func WrapError(err error, cbName string, state gobreaker.State) error {
 	if err == nil {
 		return nil
 	}
-	if err == gobreaker.ErrOpenState {
+	if errors.Is(err, gobreaker.ErrOpenState) {
 		return fmt.Errorf("circuit breaker %q is open (service degraded): %w", cbName, err)
 	}
-	if err == gobreaker.ErrTooManyRequests {
+	if errors.Is(err, gobreaker.ErrTooManyRequests) {
 		return fmt.Errorf("circuit breaker %q rejected request (too many requests in half-open state): %w", cbName, err)
 	}
 	return err

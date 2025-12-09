@@ -164,6 +164,8 @@ func (ec *AWSExecutionContext) discoverOrganizationContext(ctx context.Context) 
 		return ec.orgClient.DescribeOrganization(ctx, &organizations.DescribeOrganizationInput{})
 	})
 	if err != nil {
+		// Wrap with context, then check for circuit breaker errors
+		// WrapError now uses errors.Is so it works with wrapped errors
 		return circuitbreaker.WrapError(fmt.Errorf("failed to describe organization: %w", err), ec.orgBreaker.Name(), ec.orgBreaker.State())
 	}
 
