@@ -83,6 +83,7 @@ type Options struct {
 	ContinueOnError bool
 	Parallelism     int
 	ComputeDiff     bool
+	OutputFormat    diff.OutputFormat
 }
 
 // DefaultOptions returns sensible default options

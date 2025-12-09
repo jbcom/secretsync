@@ -46,7 +46,9 @@ jobs:
         uses: hoverkraft-tech/compose-action@248470ecc5ed40d8ed3d4480d8260d77179ef579
         with:
           compose-file: docker-compose.test.yml
-          services: localstack,vault
+          services: |
+            localstack
+            vault
           up-flags: "-d --wait"
 
       - name: Wait for services to be ready
