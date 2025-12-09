@@ -44,37 +44,21 @@ t.Errorf("RequestID mismatch: got %s, want %s", retrieved.RequestID, reqCtx.Requ
 }
 
 func TestGetRequestID(t *testing.T) {
-tests := []struct {
-name string
-ctx  context.Context
-want string
-}{
-{
-name: "with request context",
-ctx:  WithRequestContext(context.Background(), NewRequestContext()),
-want: "", // will be non-empty
-},
-{
-name: "without request context",
-ctx:  context.Background(),
-want: "",
-},
-}
+	t.Run("with request context", func(t *testing.T) {
+		reqCtx := NewRequestContext()
+		ctx := WithRequestContext(context.Background(), reqCtx)
+		got := GetRequestID(ctx)
+		if got != reqCtx.RequestID {
+			t.Errorf("GetRequestID() = %q, want %q", got, reqCtx.RequestID)
+		}
+	})
 
-for _, tt := range tests {
-t.Run(tt.name, func(t *testing.T) {
-got := GetRequestID(tt.ctx)
-if tt.name == "with request context" {
-if got == "" {
-t.Error("GetRequestID returned empty string with request context")
-}
-} else {
-if got != "" {
-t.Errorf("GetRequestID returned %s, want empty string", got)
-}
-}
-})
-}
+	t.Run("without request context", func(t *testing.T) {
+		got := GetRequestID(context.Background())
+		if got != "" {
+			t.Errorf("GetRequestID() = %q, want %q", got, "")
+		}
+	})
 }
 
 func TestGetElapsedTime(t *testing.T) {

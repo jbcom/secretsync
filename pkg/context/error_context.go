@@ -1,9 +1,10 @@
 package context
 
 import (
-"context"
-"fmt"
-"time"
+	"context"
+	"fmt"
+	"strings"
+	"time"
 )
 
 // ErrorContext contains structured metadata for error messages
@@ -57,44 +58,40 @@ return b
 
 // Build creates an error with full context
 func (b *ErrorBuilder) Build(message string, err error) error {
-duration := time.Since(b.startTime)
-requestID := GetRequestID(b.ctx)
+	duration := time.Since(b.startTime)
+	requestID := GetRequestID(b.ctx)
 
-// Build error message with available context
-var errMsg string
-if requestID != "" {
-errMsg = fmt.Sprintf("[req=%s]", requestID)
-}
+	// Build error message with available context using strings.Join for efficiency
+	var parts []string
+	if requestID != "" {
+		parts = append(parts, fmt.Sprintf("[req=%s]", requestID))
+	}
+	if b.operation != "" {
+		parts = append(parts, fmt.Sprintf("operation=%s", b.operation))
+	}
+	if b.path != "" {
+		parts = append(parts, fmt.Sprintf("path=%q", b.path))
+	}
+	if b.secretName != "" {
+		parts = append(parts, fmt.Sprintf("secret=%q", b.secretName))
+	}
+	if b.retryCount > 0 {
+		parts = append(parts, fmt.Sprintf("retries=%d", b.retryCount))
+	}
+	parts = append(parts, fmt.Sprintf("duration=%s", formatDuration(duration)))
 
-if b.operation != "" {
-errMsg += fmt.Sprintf(" operation=%s", b.operation)
-}
+	prefix := strings.Join(parts, " ")
 
-if b.path != "" {
-errMsg += fmt.Sprintf(" path=%q", b.path)
-}
+	errMsg := message
+	if prefix != "" {
+		errMsg = fmt.Sprintf("%s: %s", prefix, message)
+	}
 
-if b.secretName != "" {
-errMsg += fmt.Sprintf(" secret=%q", b.secretName)
-}
+	if err != nil {
+		return fmt.Errorf("%s: %w", errMsg, err)
+	}
 
-if b.retryCount > 0 {
-errMsg += fmt.Sprintf(" retries=%d", b.retryCount)
-}
-
-errMsg += fmt.Sprintf(" duration=%s", formatDuration(duration))
-
-if errMsg != "" {
-errMsg += ": "
-}
-
-errMsg += message
-
-if err != nil {
-return fmt.Errorf("%s: %w", errMsg, err)
-}
-
-return fmt.Errorf("%s", errMsg)
+	return fmt.Errorf("%s", errMsg)
 }
 
 // Errorf creates an error with formatted message

@@ -34,11 +34,11 @@ return context.WithValue(ctx, requestContextKey, reqCtx)
 // FromContext extracts the request context from context.Context
 // Returns nil if no request context is found
 func FromContext(ctx context.Context) *RequestContext {
-reqCtx, ok := ctx.Value(requestContextKey).(*RequestContext)
-if !ok {
-return nil
-}
-return reqCtx
+	reqCtx, ok := ctx.Value(requestContextKey).(*RequestContext)
+	if !ok || reqCtx == nil {
+		return nil
+	}
+	return reqCtx
 }
 
 // GetRequestID safely extracts the request ID from context
