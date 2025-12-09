@@ -4,11 +4,11 @@ author: "jbcom"
 description: "Sync secrets from HashiCorp Vault to AWS Secrets Manager across multiple accounts"
 runs:
   using: "docker"
-  # TODO: Once v1 image is published, use immutable digest format for security:
-  # 1. Get digest: docker pull jbcom/secretsync:v1 && docker inspect --format='{{index .RepoDigests 0}}' jbcom/secretsync:v1
-  # 2. Update to: image: "docker://jbcom/secretsync:v1@sha256:<digest>"
-  # This ensures reproducibility by pinning to exact image content.
-  image: "docker://jbcom/secretsync:v1" # x-release-please-version
+  # Image digest is automatically updated by the release workflow when a new
+  # version is published. The workflow captures the SHA256 digest from the
+  # Docker build/push step and updates this reference to ensure immutable,
+  # reproducible builds. Format: image@sha256:<digest>
+  image: "docker://jbcom/secretsync:v1@sha256:PLACEHOLDER_UPDATED_BY_RELEASE_WORKFLOW" # x-release-please-version
 branding:
   icon: "lock"
   color: "blue"
