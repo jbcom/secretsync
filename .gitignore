@@ -17,6 +17,11 @@ vss
 dist/
 build/
 
+# Documentation build artifacts
+docs/_build/
+uv.lock
+.venv/
+
 # Test artifacts
 *.test
 *.out
