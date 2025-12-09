@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/jbcom/secretsync/pkg/driver"
@@ -9,6 +10,19 @@ import (
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+// getTestEndpoint returns the LocalStack endpoint if available
+func getTestEndpoint() string {
+	return os.Getenv("AWS_ENDPOINT_URL")
+}
+
+// skipIfNoLocalStack skips the test if LocalStack is not available
+func skipIfNoLocalStack(t *testing.T) {
+	t.Helper()
+	if getTestEndpoint() == "" {
+		t.Skip("Skipping integration test: AWS_ENDPOINT_URL not set (LocalStack not available)")
+	}
+}
 
 func TestNewClient(t *testing.T) {
 	tests := []struct {

@@ -109,8 +109,14 @@ func NewClient(cfg *AwsClient) (*AwsClient, error) {
 }
 
 func (c *AwsClient) CreateClient(ctx context.Context) error {
+	return c.CreateClientWithEndpoint(ctx, "")
+}
+
+// CreateClientWithEndpoint creates a client with an optional custom endpoint (for LocalStack)
+func (c *AwsClient) CreateClientWithEndpoint(ctx context.Context, endpoint string) error {
 	l := log.WithFields(log.Fields{
-		"action": "CreateClient",
+		"action":   "CreateClient",
+		"endpoint": endpoint,
 	})
 	l.Trace("start")
 	awscfg, err := config.LoadDefaultConfig(ctx)
@@ -124,10 +130,18 @@ func (c *AwsClient) CreateClient(ctx context.Context) error {
 		provider = stscreds.NewAssumeRoleProvider(stsclient, c.RoleArn)
 		awscfg.Credentials = provider
 	}
-	svc := secretsmanager.New(secretsmanager.Options{
+
+	opts := secretsmanager.Options{
 		Region:      c.Region,
 		Credentials: awscfg.Credentials,
-	})
+	}
+
+	// Support custom endpoint for LocalStack/testing
+	if endpoint != "" {
+		opts.BaseEndpoint = aws.String(endpoint)
+	}
+
+	svc := secretsmanager.New(opts)
 	c.client = svc
 	l.Trace("end")
 	return nil
