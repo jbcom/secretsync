@@ -1,5 +1,5 @@
 // +k8s:deepcopy-gen=package
-// +groupName=vaultsecretsync.lestak.sh
+// +groupName=secretsync.jbcom.dev
 package v1alpha1
 
 import (
@@ -14,17 +14,17 @@ import (
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
-// +kubebuilder:resource:path=vaultsecretsyncs,scope=Namespaced,shortName=vss
-// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.status`,description="Current status of the VaultSecretSync"
+// +kubebuilder:resource:path=secretsyncs,scope=Namespaced,shortName=ss
+// +kubebuilder:printcolumn:name="Status",type=string,JSONPath=`.status.status`,description="Current status of the SecretSync"
 // +kubebuilder:printcolumn:name="SyncDestinations",type=integer,JSONPath=`.status.syncDestinations`,description="Number of destinations synced"
 
-// VaultSecretSync is the Schema for the vaultsecretsyncs API
-type VaultSecretSync struct {
+// SecretSync is the Schema for the secretsyncs API
+type SecretSync struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   VaultSecretSyncSpec   `json:"spec,omitempty"`
-	Status VaultSecretSyncStatus `json:"status,omitempty"`
+	Spec   SecretSyncSpec   `json:"spec,omitempty"`
+	Status SecretSyncStatus `json:"status,omitempty"`
 }
 
 type NotificationEvent string
@@ -35,9 +35,9 @@ const (
 )
 
 type StoreConfig struct {
-	AWS            *aws.AwsClient                          `json:"aws,omitempty" yaml:"aws,omitempty"`
-	IdentityCenter *identitycenter.IdentityCenterClient    `json:"awsIdentityCenter,omitempty" yaml:"awsIdentityCenter,omitempty"`
-	Vault          *vault.VaultClient                      `json:"vault,omitempty" yaml:"vault,omitempty"`
+	AWS            *aws.AwsClient                       `json:"aws,omitempty" yaml:"aws,omitempty"`
+	IdentityCenter *identitycenter.IdentityCenterClient `json:"awsIdentityCenter,omitempty" yaml:"awsIdentityCenter,omitempty"`
+	Vault          *vault.VaultClient                   `json:"vault,omitempty" yaml:"vault,omitempty"`
 }
 
 type RegexpFilterConfig struct {
@@ -101,9 +101,9 @@ type SlackNotification struct {
 }
 
 type NotificationMessage struct {
-	Event           NotificationEvent `json:"event"`
-	Message         string            `json:"message"`
-	VaultSecretSync VaultSecretSync   `json:"vaultSecretSync"`
+	Event      NotificationEvent `json:"event"`
+	Message    string            `json:"message"`
+	SecretSync SecretSync        `json:"secretSync"`
 }
 
 type NotificationSpec struct {
@@ -114,8 +114,8 @@ type NotificationSpec struct {
 
 // +kubebuilder:object:generate=true
 
-// VaultSecretSyncSpec defines the desired state of VaultSecretSync
-type VaultSecretSyncSpec struct {
+// SecretSyncSpec defines the desired state of SecretSync
+type SecretSyncSpec struct {
 	Source                *vault.VaultClient  `yaml:"source" json:"source"`
 	Dest                  []*StoreConfig      `yaml:"dest" json:"dest"`
 	SyncDelete            *bool               `yaml:"syncDelete,omitempty" json:"syncDelete,omitempty"`
@@ -129,8 +129,8 @@ type VaultSecretSyncSpec struct {
 
 // +kubebuilder:object:generate=true
 
-// VaultSecretSyncStatus defines the observed state of VaultSecretSync
-type VaultSecretSyncStatus struct {
+// SecretSyncStatus defines the observed state of SecretSync
+type SecretSyncStatus struct {
 	Status           string      `json:"status,omitempty"`
 	LastSyncTime     metav1.Time `json:"lastSyncTime,omitempty"`
 	SyncDestinations int         `json:"syncDestinations,omitempty"`
@@ -140,9 +140,9 @@ type VaultSecretSyncStatus struct {
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
 // +kubebuilder:object:root=true
 
-// VaultSecretSyncList contains a list of VaultSecretSync
-type VaultSecretSyncList struct {
+// SecretSyncList contains a list of SecretSync
+type SecretSyncList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []VaultSecretSync `json:"items"`
+	Items           []SecretSync `json:"items"`
 }
