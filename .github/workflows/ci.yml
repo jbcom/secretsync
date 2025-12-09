@@ -41,9 +41,9 @@ jobs:
       - name: Download dependencies
         run: go mod download
 
-      # hoverkraft-tech/compose-action v2.0.2
+      # hoverkraft-tech/compose-action v2.4.2
       - name: Start test services
-        uses: hoverkraft-tech/compose-action@v2.0.2
+        uses: hoverkraft-tech/compose-action@248470ecc5ed40d8ed3d4480d8260d77179ef579
         with:
           compose-file: docker-compose.test.yml
           services: localstack,vault
