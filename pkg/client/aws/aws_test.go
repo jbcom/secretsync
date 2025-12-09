@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/jbcom/secretsync/pkg/driver"
@@ -365,13 +366,13 @@ func TestAwsClient_ConcurrentMapAccess(t *testing.T) {
 		iterations = 100
 	)
 
-	// Use a channel to coordinate goroutine completion
-	done := make(chan bool)
+	var wg sync.WaitGroup
 
 	// Simulate concurrent writes to accountSecretArns (like ListSecrets does)
 	for i := 0; i < numWriters; i++ {
+		wg.Add(1)
 		go func(writerID int) {
-			defer func() { done <- true }()
+			defer wg.Done()
 			for j := 0; j < iterations; j++ {
 				// Simulate what ListSecrets does: replace the entire map
 				newMap := make(map[string]string)
@@ -387,8 +388,9 @@ func TestAwsClient_ConcurrentMapAccess(t *testing.T) {
 
 	// Simulate concurrent reads from accountSecretArns (like GetSecret, updateSecret, DeleteSecret do)
 	for i := 0; i < numReaders; i++ {
+		wg.Add(1)
 		go func(readerID int) {
-			defer func() { done <- true }()
+			defer wg.Done()
 			for j := 0; j < iterations; j++ {
 				// Simulate what GetSecret/updateSecret/DeleteSecret do: read from map
 				client.arnMu.RLock()
@@ -403,9 +405,7 @@ func TestAwsClient_ConcurrentMapAccess(t *testing.T) {
 	}
 
 	// Wait for all goroutines to complete
-	for i := 0; i < numWriters+numReaders; i++ {
-		<-done
-	}
+	wg.Wait()
 
 	// Test passes if no race condition occurred
 	// When run with -race flag, Go's race detector will catch any issues
@@ -425,12 +425,13 @@ func TestAwsClient_DeepCopyConcurrentSafety(t *testing.T) {
 	}
 
 	const numCopiers = 20
-	done := make(chan bool)
+	var wg sync.WaitGroup
 
 	// Perform concurrent deep copies
 	for i := 0; i < numCopiers; i++ {
+		wg.Add(1)
 		go func() {
-			defer func() { done <- true }()
+			defer wg.Done()
 			for j := 0; j < 50; j++ {
 				copied := original.DeepCopy()
 				assert.NotNil(t, copied)
@@ -441,8 +442,9 @@ func TestAwsClient_DeepCopyConcurrentSafety(t *testing.T) {
 	}
 
 	// Also modify the original map concurrently
+	wg.Add(1)
 	go func() {
-		defer func() { done <- true }()
+		defer wg.Done()
 		for j := 0; j < 100; j++ {
 			original.arnMu.Lock()
 			original.accountSecretArns[fmt.Sprintf("new-secret-%d", j)] = fmt.Sprintf("new-arn-%d", j)
@@ -451,7 +453,5 @@ func TestAwsClient_DeepCopyConcurrentSafety(t *testing.T) {
 	}()
 
 	// Wait for all goroutines
-	for i := 0; i < numCopiers+1; i++ {
-		<-done
-	}
+	wg.Wait()
 }
