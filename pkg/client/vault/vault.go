@@ -531,11 +531,11 @@ func (vc *VaultClient) getQueueCompactionThreshold() int {
 	// Use adaptive threshold based on maxSecretsPerMount
 	maxSecrets := vc.getMaxSecretsPerMount()
 	adaptiveThreshold := maxSecrets / 100
+	if adaptiveThreshold < 1 {
+		adaptiveThreshold = 1 // Ensure minimum threshold to prevent division by zero
+	}
 	if adaptiveThreshold > defaultQueueCompactionThreshold {
 		return defaultQueueCompactionThreshold
-	}
-	if adaptiveThreshold < 1 {
-		return 1 // Minimum threshold of 1 to ensure compaction can occur
 	}
 	return adaptiveThreshold
 }
