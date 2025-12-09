@@ -2,18 +2,18 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
-	"github.com/hashicorp/vault/sdk/logical"
-	"github.com/jbcom/secretsync/api/v1alpha1"
-	"github.com/jbcom/secretsync/internal/backend"
 	"github.com/jbcom/secretsync/pkg/client/aws"
 	"github.com/jbcom/secretsync/pkg/client/vault"
 	log "github.com/sirupsen/logrus"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// syncTarget syncs merged secrets to AWS for a single target
+// syncTarget executes sync operations for a single target.
+// Each sync is a distinct, idempotent operation: read from merge store, write to AWS.
 func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun bool) Result {
 	start := time.Now()
 	l := log.WithFields(log.Fields{
@@ -33,14 +33,12 @@ func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun boo
 		}
 	}
 
-	roleARN := p.config.GetRoleARN(target.AccountID)
-
-	// Determine source path based on merge store type
-	var sourcePath string
+	// Determine source (merge store) path
+	var mergePath string
 	if p.config.MergeStore.Vault != nil {
-		sourcePath = fmt.Sprintf("%s/%s", p.config.MergeStore.Vault.Mount, targetName)
+		mergePath = fmt.Sprintf("%s/%s", p.config.MergeStore.Vault.Mount, targetName)
 	} else if p.s3Store != nil {
-		sourcePath = p.s3Store.GetMergePath(targetName)
+		mergePath = p.s3Store.GetMergePath(targetName)
 	} else {
 		return Result{
 			Target:   targetName,
@@ -51,58 +49,176 @@ func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun boo
 		}
 	}
 
+	l.WithFields(log.Fields{
+		"mergePath": mergePath,
+		"accountId": target.AccountID,
+	}).Info("Starting sync")
+
+	// Initialize source client (merge store)
+	var secrets []string
+	var secretsData map[string]map[string]interface{}
+
+	if p.config.MergeStore.Vault != nil {
+		mergeClient := &vault.VaultClient{
+			Address:   p.config.Vault.Address,
+			Namespace: p.config.Vault.Namespace,
+		}
+		if err := mergeClient.Init(ctx); err != nil {
+			return Result{
+				Target:   targetName,
+				Phase:    "sync",
+				Success:  false,
+				Error:    fmt.Errorf("failed to init merge vault client: %w", err),
+				Duration: time.Since(start),
+			}
+		}
+
+		var err error
+		secrets, err = mergeClient.ListSecrets(ctx, mergePath)
+		if err != nil {
+			return Result{
+				Target:   targetName,
+				Phase:    "sync",
+				Success:  false,
+				Error:    fmt.Errorf("failed to list secrets from merge store: %w", err),
+				Duration: time.Since(start),
+			}
+		}
+
+		// Read all secret data
+		secretsData = make(map[string]map[string]interface{})
+		for _, secretPath := range secrets {
+			data, err := mergeClient.GetKVSecretOnce(ctx, secretPath)
+			if err != nil {
+				l.WithError(err).WithField("secret", secretPath).Warn("Failed to read secret from merge store")
+				continue
+			}
+			secretsData[secretPath] = data
+		}
+	} else if p.s3Store != nil {
+		var err error
+		secrets, err = p.s3Store.ListSecrets(ctx, targetName)
+		if err != nil {
+			return Result{
+				Target:   targetName,
+				Phase:    "sync",
+				Success:  false,
+				Error:    fmt.Errorf("failed to list secrets from S3 merge store: %w", err),
+				Duration: time.Since(start),
+			}
+		}
+
+		secretsData = make(map[string]map[string]interface{})
+		for _, secretPath := range secrets {
+			data, err := p.s3Store.ReadSecret(ctx, targetName, secretPath)
+			if err != nil {
+				l.WithError(err).WithField("secret", secretPath).Warn("Failed to read secret from S3")
+				continue
+			}
+			secretsData[secretPath] = data
+		}
+	}
+
+	l.WithField("secretsCount", len(secrets)).Debug("Retrieved secrets from merge store")
+
+	if dryRun {
+		l.WithField("secretsCount", len(secrets)).Info("[DRY-RUN] Would sync secrets to AWS")
+		return Result{
+			Target:    targetName,
+			Phase:     "sync",
+			Operation: string(OperationSync),
+			Success:   true,
+			Duration:  time.Since(start),
+			Details: ResultDetails{
+				SecretsProcessed: len(secrets),
+				SourcePaths:      []string{mergePath},
+				DestinationPath:  fmt.Sprintf("aws://%s", target.AccountID),
+			},
+		}
+	}
+
+	// Get role ARN and region for this target
+	roleARN := p.getRoleARNForTarget(target)
 	region := target.Region
 	if region == "" {
 		region = p.config.AWS.Region
 	}
 
+	// Initialize AWS client for target account
+	awsClient, err := p.getAWSClientForTarget(ctx, target)
+	if err != nil {
+		return Result{
+			Target:   targetName,
+			Phase:    "sync",
+			Success:  false,
+			Error:    fmt.Errorf("failed to get AWS client for target: %w", err),
+			Duration: time.Since(start),
+		}
+	}
+
+	// Sync each secret to AWS
+	var syncErrors []string
+	successCount := 0
+
+	for secretPath, data := range secretsData {
+		// Determine AWS secret name
+		awsSecretName := p.getAWSSecretName(targetName, secretPath)
+
+		// Convert data to JSON bytes for AWS
+		secretBytes, err := json.Marshal(data)
+		if err != nil {
+			l.WithError(err).WithField("secret", secretPath).Error("Failed to marshal secret data")
+			syncErrors = append(syncErrors, secretPath)
+			continue
+		}
+
+		// Create metadata for the write operation
+		meta := metav1.ObjectMeta{
+			Name:      awsSecretName,
+			Namespace: targetName,
+		}
+
+		if _, err := awsClient.WriteSecret(ctx, meta, awsSecretName, secretBytes); err != nil {
+			l.WithError(err).WithFields(log.Fields{
+				"secret":    secretPath,
+				"awsSecret": awsSecretName,
+			}).Error("Failed to write secret to AWS")
+			syncErrors = append(syncErrors, secretPath)
+			continue
+		}
+
+		l.WithFields(log.Fields{
+			"secret":    secretPath,
+			"awsSecret": awsSecretName,
+		}).Debug("Secret synced to AWS")
+		successCount++
+	}
+
+	success := len(syncErrors) == 0
+	var lastErr error
+	if !success {
+		lastErr = fmt.Errorf("failed to sync %d secrets: %v", len(syncErrors), syncErrors)
+	}
+
 	l.WithFields(log.Fields{
-		"accountID":  target.AccountID,
-		"roleARN":    roleARN,
-		"sourcePath": sourcePath,
-		"region":     region,
-	}).Info("Starting sync to AWS")
-
-	// Create and execute sync
-	syncConfig := p.createAWSSync(targetName, sourcePath, roleARN, region, dryRun)
-
-	if err := backend.AddSyncConfig(syncConfig); err != nil {
-		return Result{
-			Target:   targetName,
-			Phase:    "sync",
-			Success:  false,
-			Error:    fmt.Errorf("failed to add sync config: %w", err),
-			Duration: time.Since(start),
-		}
-	}
-
-	if err := backend.ManualTrigger(ctx, syncConfig, logical.UpdateOperation); err != nil {
-		return Result{
-			Target:   targetName,
-			Phase:    "sync",
-			Success:  false,
-			Error:    fmt.Errorf("failed to trigger sync: %w", err),
-			Duration: time.Since(start),
-		}
-	}
-
-	// TODO: The backend.ManualTrigger is async and doesn't provide a completion signal.
-	// This sleep is a temporary workaround until we implement proper synchronization.
-	// Future improvement: make backend operations synchronous or return a completion channel.
-	time.Sleep(500 * time.Millisecond)
-
-	l.WithField("duration", time.Since(start)).Info("Sync completed")
+		"duration": time.Since(start),
+		"success":  success,
+		"synced":   successCount,
+		"failed":   len(syncErrors),
+	}).Info("Sync completed")
 
 	result := Result{
 		Target:    targetName,
 		Phase:     "sync",
 		Operation: string(OperationSync),
-		Success:   true,
+		Success:   success,
+		Error:     lastErr,
 		Duration:  time.Since(start),
 		Details: ResultDetails{
-			SourcePaths:     []string{sourcePath},
-			DestinationPath: fmt.Sprintf("aws:%s", target.AccountID),
-			RoleARN:         roleARN,
+			SecretsProcessed: successCount,
+			SourcePaths:      []string{mergePath},
+			DestinationPath:  fmt.Sprintf("aws://%s", target.AccountID),
+			RoleARN:          roleARN,
 		},
 	}
 
@@ -114,40 +230,63 @@ func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun boo
 		} else {
 			result.Diff = targetDiff
 			p.addTargetDiff(*targetDiff)
-			l.WithFields(log.Fields{
-				"added":    targetDiff.Summary.Added,
-				"removed":  targetDiff.Summary.Removed,
-				"modified": targetDiff.Summary.Modified,
-			}).Debug("Diff computed for sync")
 		}
 	}
 
 	return result
 }
 
-// createAWSSync creates a SecretSync for syncing to AWS
-func (p *Pipeline) createAWSSync(targetName, sourcePath, roleARN, region string, dryRun bool) v1alpha1.SecretSync {
-	sync := v1alpha1.SecretSync{
-		Spec: v1alpha1.SecretSyncSpec{
-			DryRun:     boolPtr(dryRun),
-			SyncDelete: boolPtr(p.config.Pipeline.Sync.DeleteOrphans),
-			Source: &vault.VaultClient{
-				Address:   p.config.Vault.Address,
-				Namespace: p.config.Vault.Namespace,
-				Path:      fmt.Sprintf("%s/(.*)", sourcePath),
-			},
-			Dest: []*v1alpha1.StoreConfig{
-				{
-					AWS: &aws.AwsClient{
-						Name:    "$1",
-						Region:  region,
-						RoleArn: roleARN,
-					},
-				},
-			},
-		},
+// getAWSClientForTarget returns an AWS client configured for the target account.
+// It handles cross-account role assumption via Control Tower or custom patterns.
+func (p *Pipeline) getAWSClientForTarget(ctx context.Context, target Target) (*aws.AwsClient, error) {
+	region := target.Region
+	if region == "" {
+		region = p.config.AWS.Region
 	}
-	sync.Name = fmt.Sprintf("sync-%s", targetName)
-	sync.Namespace = "pipeline"
-	return sync
+
+	client := &aws.AwsClient{
+		Region: region,
+	}
+
+	// If we have an AWS execution context with role assumption
+	roleArn := p.getRoleARNForTarget(target)
+	if roleArn != "" {
+		client.RoleArn = roleArn
+	}
+
+	if err := client.Init(ctx); err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// getRoleARNForTarget returns the role ARN for assuming into the target account
+func (p *Pipeline) getRoleARNForTarget(target Target) string {
+	if target.AccountID == "" {
+		return ""
+	}
+
+	// Use custom role pattern if provided
+	if p.awsCtx != nil && p.config.AWS.ExecutionContext.CustomRolePattern != "" {
+		return fmt.Sprintf(p.config.AWS.ExecutionContext.CustomRolePattern, target.AccountID)
+	}
+
+	// Use Control Tower execution role if enabled
+	if p.config.AWS.ControlTower.Enabled {
+		roleName := p.config.AWS.ControlTower.ExecutionRole.Name
+		if roleName == "" {
+			roleName = "AWSControlTowerExecution"
+		}
+		return fmt.Sprintf("arn:aws:iam::%s:role/%s", target.AccountID, roleName)
+	}
+
+	return ""
+}
+
+// getAWSSecretName determines the AWS Secrets Manager secret name for a given path.
+func (p *Pipeline) getAWSSecretName(targetName, secretPath string) string {
+	// Default: use the secret path as-is
+	// Could be customized via target config or naming patterns
+	return secretPath
 }

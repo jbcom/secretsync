@@ -1,11 +1,10 @@
-// Package pipeline provides a unified secrets synchronization pipeline that works
-// identically across all execution modes: CLI, Kubernetes, and Vault event-driven.
+// Package pipeline provides a unified secrets synchronization pipeline.
 //
 // Architecture:
 //
 //	┌─────────────────────────────────────────────────────────────────────────┐
 //	│                         Pipeline Configuration                          │
-//	│  (YAML file, Kubernetes CRD, ConfigMap, or programmatic)               │
+//	│  (YAML file or programmatic)                                            │
 //	└─────────────────────────────────────────────────────────────────────────┘
 //	                                    │
 //	                                    ▼
@@ -14,20 +13,24 @@
 //	│  • Dependency graph resolution                                          │
 //	│  • Topological ordering                                                 │
 //	│  • Parallel execution within levels                                     │
-//	│  • Operation modes: merge, sync, pipeline (merge+sync)                  │
+//	│  • Each operation is distinct and idempotent                            │
 //	└─────────────────────────────────────────────────────────────────────────┘
 //	                                    │
-//	          ┌─────────────────────────┼─────────────────────────┐
-//	          ▼                         ▼                         ▼
-//	┌─────────────────┐       ┌─────────────────┐       ┌─────────────────┐
-//	│   CLI Runner    │       │  K8s Operator   │       │  Vault Events   │
-//	│  (secretsync pipeline) │       │  (CRD watch)    │       │  (webhook)      │
-//	└─────────────────┘       └─────────────────┘       └─────────────────┘
+//	          ┌─────────────────────────┴─────────────────────────┐
+//	          ▼                                                   ▼
+//	┌─────────────────┐                                 ┌─────────────────┐
+//	│   Merge Phase   │                                 │   Sync Phase    │
+//	│  Vault → Vault  │                                 │  Vault → AWS    │
+//	│  (or S3)        │                                 │                 │
+//	└─────────────────┘                                 └─────────────────┘
 //
 // Operations:
 //   - merge:    Source stores → Merge store (with inheritance resolution)
-//   - sync:     Merge store → Destination stores (AWS, etc.)
+//   - sync:     Merge store → Destination stores (AWS)
 //   - pipeline: merge + sync in correct dependency order
+//
+// Each operation is distinct and idempotent. Running the same operation
+// multiple times produces the same result.
 package pipeline
 
 import (
@@ -36,12 +39,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jbcom/secretsync/api/v1alpha1"
-	"github.com/jbcom/secretsync/internal/backend"
-	"github.com/jbcom/secretsync/internal/queue"
-	internalSync "github.com/jbcom/secretsync/internal/sync"
-	"github.com/jbcom/secretsync/pkg/client/aws"
-	"github.com/jbcom/secretsync/pkg/client/vault"
 	"github.com/jbcom/secretsync/pkg/diff"
 	log "github.com/sirupsen/logrus"
 )
@@ -187,7 +184,8 @@ func NewFromFileWithContext(ctx context.Context, path string) (*Pipeline, error)
 	return NewWithContext(ctx, cfg)
 }
 
-// Run executes the pipeline with the given options
+// Run executes the pipeline with the given options.
+// Each operation (merge, sync) is distinct and idempotent.
 func (p *Pipeline) Run(ctx context.Context, opts Options) ([]Result, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -197,10 +195,6 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) ([]Result, error) {
 		"operation": opts.Operation,
 		"dryRun":    opts.DryRun,
 	})
-
-	if err := p.initialize(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize pipeline: %w", err)
-	}
 
 	p.resultsMu.Lock()
 	p.results = nil
@@ -220,6 +214,8 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) ([]Result, error) {
 		}
 	}
 
+	p.initialized = true
+
 	switch opts.Operation {
 	case OperationMerge:
 		return p.runMerge(ctx, targets, opts)
@@ -230,74 +226,6 @@ func (p *Pipeline) Run(ctx context.Context, opts Options) ([]Result, error) {
 	default:
 		return nil, fmt.Errorf("unknown operation: %s", opts.Operation)
 	}
-}
-
-// initialize sets up the sync infrastructure
-func (p *Pipeline) initialize(ctx context.Context) error {
-	if p.initialized {
-		return nil
-	}
-
-	l := log.WithField("action", "Pipeline.initialize")
-	l.Debug("Initializing pipeline infrastructure")
-
-	backend.ManualTrigger = internalSync.ManualTrigger
-
-	if queue.Q == nil {
-		if err := queue.Init(queue.QueueTypeMemory, nil); err != nil {
-			return fmt.Errorf("failed to initialize queue: %w", err)
-		}
-	}
-
-	p.setDefaultStores()
-
-	// Use a channel to signal when the event processor is ready
-	ready := make(chan struct{})
-	errCh := make(chan error, 1)
-
-	go func() {
-		workerPoolSize := p.config.Pipeline.Merge.Parallel
-		if workerPoolSize <= 0 {
-			workerPoolSize = 4
-		}
-		// Signal ready before entering the event loop
-		close(ready)
-		if err := internalSync.EventProcessor(ctx, workerPoolSize, workerPoolSize); err != nil {
-			l.WithError(err).Error("Event processor exited")
-			select {
-			case errCh <- err:
-			default:
-			}
-		}
-	}()
-
-	// Wait for the event processor to be ready or timeout
-	select {
-	case <-ready:
-		// Event processor goroutine has started
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("timeout waiting for event processor to start")
-	}
-
-	p.initialized = true
-	l.Info("Pipeline infrastructure initialized")
-	return nil
-}
-
-// setDefaultStores configures default store settings
-func (p *Pipeline) setDefaultStores() {
-	stores := &v1alpha1.StoreConfig{
-		Vault: &vault.VaultClient{
-			Address:   p.config.Vault.Address,
-			Namespace: p.config.Vault.Namespace,
-		},
-		AWS: &aws.AwsClient{
-			Region: p.config.AWS.Region,
-		},
-	}
-	internalSync.SetStoreDefaults(stores)
 }
 
 // resolveTargets returns the targets to process, including dependencies

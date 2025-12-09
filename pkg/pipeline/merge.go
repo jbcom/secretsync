@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/hashicorp/vault/sdk/logical"
-	"github.com/jbcom/secretsync/api/v1alpha1"
-	"github.com/jbcom/secretsync/internal/backend"
 	"github.com/jbcom/secretsync/pkg/client/vault"
 	log "github.com/sirupsen/logrus"
 )
 
-// mergeTarget executes merge operations for a single target
+// mergeTarget executes merge operations for a single target.
+// Each merge is a distinct, idempotent operation: read from source(s), write to merge store.
 func (p *Pipeline) mergeTarget(ctx context.Context, targetName string, dryRun bool) Result {
 	start := time.Now()
 	l := log.WithFields(log.Fields{
@@ -49,11 +47,45 @@ func (p *Pipeline) mergeTarget(ctx context.Context, targetName string, dryRun bo
 	}
 	l.WithField("mergePath", mergePath).Info("Starting merge")
 
+	// Initialize Vault client for reading sources
+	sourceClient := &vault.VaultClient{
+		Address:   p.config.Vault.Address,
+		Namespace: p.config.Vault.Namespace,
+	}
+	if err := sourceClient.Init(ctx); err != nil {
+		return Result{
+			Target:   targetName,
+			Phase:    "merge",
+			Success:  false,
+			Error:    fmt.Errorf("failed to init source vault client: %w", err),
+			Duration: time.Since(start),
+		}
+	}
+
+	// Initialize Vault client for writing to merge store (if using Vault merge store)
+	var mergeClient *vault.VaultClient
+	if p.config.MergeStore.Vault != nil {
+		mergeClient = &vault.VaultClient{
+			Address:   p.config.Vault.Address,
+			Namespace: p.config.Vault.Namespace,
+		}
+		if err := mergeClient.Init(ctx); err != nil {
+			return Result{
+				Target:   targetName,
+				Phase:    "merge",
+				Success:  false,
+				Error:    fmt.Errorf("failed to init merge vault client: %w", err),
+				Duration: time.Since(start),
+			}
+		}
+	}
+
 	var sourcePaths []string
 	var failedImports []string
 	var lastErr error
 	successCount := 0
 
+	// Each import is a distinct source→target operation
 	for _, importName := range target.Imports {
 		sourcePath := p.config.GetSourcePath(importName)
 		sourcePaths = append(sourcePaths, sourcePath)
@@ -63,53 +95,54 @@ func (p *Pipeline) mergeTarget(ctx context.Context, targetName string, dryRun bo
 			"sourcePath": sourcePath,
 		}).Debug("Processing import")
 
-		// Use Vault merge store (standard path)
-		if p.config.MergeStore.Vault != nil {
-			syncConfig := p.createMergeSync(importName, targetName, sourcePath, mergePath, dryRun)
-
-			if err := backend.AddSyncConfig(syncConfig); err != nil {
-				l.WithError(err).WithField("import", importName).Error("Failed to add sync config")
-				failedImports = append(failedImports, importName)
-				lastErr = err
-				continue
-			}
-
-			if err := backend.ManualTrigger(ctx, syncConfig, logical.UpdateOperation); err != nil {
-				l.WithError(err).WithField("import", importName).Error("Failed to trigger merge")
-				failedImports = append(failedImports, importName)
-				lastErr = err
-				continue
-			}
+		// Read secrets from source
+		secrets, err := sourceClient.ListSecrets(ctx, sourcePath)
+		if err != nil {
+			l.WithError(err).WithField("import", importName).Error("Failed to list secrets from source")
+			failedImports = append(failedImports, importName)
+			lastErr = err
+			continue
 		}
 
-		// Use S3 merge store
-		if p.s3Store != nil && !dryRun {
-			secretData := map[string]interface{}{
-				"_source":    importName,
-				"_target":    targetName,
-				"_timestamp": time.Now().UTC().Format(time.RFC3339),
-			}
-			if err := p.s3Store.WriteSecret(ctx, targetName, importName, secretData); err != nil {
-				l.WithError(err).WithField("import", importName).Error("Failed to write to S3 merge store")
-				failedImports = append(failedImports, importName)
-				lastErr = err
+		if dryRun {
+			l.WithFields(log.Fields{
+				"import":       importName,
+				"secretsCount": len(secrets),
+			}).Info("[DRY-RUN] Would merge secrets")
+			successCount++
+			continue
+		}
+
+		// Write each secret to merge store
+		for _, secretPath := range secrets {
+			// Read secret data
+			secretData, err := sourceClient.GetKVSecretOnce(ctx, secretPath)
+			if err != nil {
+				l.WithError(err).WithField("secret", secretPath).Warn("Failed to read secret, skipping")
 				continue
+			}
+
+			// Write to merge store (Vault or S3)
+			destPath := fmt.Sprintf("%s/%s", mergePath, secretPath)
+			
+			if mergeClient != nil {
+				// Vault merge store
+				if _, err := mergeClient.WriteSecretOnce(ctx, destPath, secretData, nil); err != nil {
+					l.WithError(err).WithField("dest", destPath).Error("Failed to write to merge store")
+					lastErr = err
+					continue
+				}
+			} else if p.s3Store != nil {
+				// S3 merge store
+				if err := p.s3Store.WriteSecret(ctx, targetName, secretPath, secretData); err != nil {
+					l.WithError(err).WithField("dest", destPath).Error("Failed to write to S3 merge store")
+					lastErr = err
+					continue
+				}
 			}
 		}
 
 		successCount++
-	}
-
-	// TODO: The backend.ManualTrigger is async and doesn't provide a completion signal.
-	// This sleep is a temporary workaround until we implement proper synchronization.
-	// The duration is proportional to the number of imports to account for processing time.
-	// Future improvement: make backend operations synchronous or return a completion channel.
-	if p.config.MergeStore.Vault != nil && successCount > 0 {
-		waitDuration := time.Duration(successCount*300) * time.Millisecond
-		if waitDuration > 5*time.Second {
-			waitDuration = 5 * time.Second // Cap at 5 seconds
-		}
-		time.Sleep(waitDuration)
 	}
 
 	success := lastErr == nil
@@ -142,41 +175,8 @@ func (p *Pipeline) mergeTarget(ctx context.Context, targetName string, dryRun bo
 		} else {
 			result.Diff = targetDiff
 			p.addTargetDiff(*targetDiff)
-			l.WithFields(log.Fields{
-				"added":    targetDiff.Summary.Added,
-				"removed":  targetDiff.Summary.Removed,
-				"modified": targetDiff.Summary.Modified,
-			}).Debug("Diff computed for merge")
 		}
 	}
 
 	return result
-}
-
-// createMergeSync creates a SecretSync for merging sources
-func (p *Pipeline) createMergeSync(importName, targetName, sourcePath, mergePath string, dryRun bool) v1alpha1.SecretSync {
-	sync := v1alpha1.SecretSync{
-		Spec: v1alpha1.SecretSyncSpec{
-			DryRun:     boolPtr(dryRun),
-			SyncDelete: boolPtr(false),
-			Source: &vault.VaultClient{
-				Address:   p.config.Vault.Address,
-				Namespace: p.config.Vault.Namespace,
-				Path:      fmt.Sprintf("%s/(.*)", sourcePath),
-			},
-			Dest: []*v1alpha1.StoreConfig{
-				{
-					Vault: &vault.VaultClient{
-						Address:   p.config.Vault.Address,
-						Namespace: p.config.Vault.Namespace,
-						Path:      fmt.Sprintf("%s/$1", mergePath),
-						Merge:     true,
-					},
-				},
-			},
-		},
-	}
-	sync.Name = fmt.Sprintf("merge-%s-to-%s", importName, targetName)
-	sync.Namespace = "pipeline"
-	return sync
 }
