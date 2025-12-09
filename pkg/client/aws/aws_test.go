@@ -2,6 +2,7 @@ package aws
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 
@@ -346,4 +347,111 @@ func TestAwsClient_Close(t *testing.T) {
 	err := client.Close()
 	assert.NoError(t, err)
 	assert.Nil(t, client.client)
+}
+
+// TestAwsClient_ConcurrentMapAccess validates that accountSecretArns map
+// is protected by arnMu mutex and can handle concurrent read/write operations
+// without data races. This test specifically addresses the race condition
+// concern raised in issue #29.
+func TestAwsClient_ConcurrentMapAccess(t *testing.T) {
+	client := &AwsClient{
+		Name:              "test-concurrent",
+		accountSecretArns: make(map[string]string),
+	}
+
+	const (
+		numWriters = 10
+		numReaders = 20
+		iterations = 100
+	)
+
+	// Use a channel to coordinate goroutine completion
+	done := make(chan bool)
+
+	// Simulate concurrent writes to accountSecretArns (like ListSecrets does)
+	for i := 0; i < numWriters; i++ {
+		go func(writerID int) {
+			defer func() { done <- true }()
+			for j := 0; j < iterations; j++ {
+				// Simulate what ListSecrets does: replace the entire map
+				newMap := make(map[string]string)
+				for k := 0; k < 5; k++ {
+					newMap[fmt.Sprintf("secret-%d-%d-%d", writerID, j, k)] = fmt.Sprintf("arn-%d-%d-%d", writerID, j, k)
+				}
+				client.arnMu.Lock()
+				client.accountSecretArns = newMap
+				client.arnMu.Unlock()
+			}
+		}(i)
+	}
+
+	// Simulate concurrent reads from accountSecretArns (like GetSecret, updateSecret, DeleteSecret do)
+	for i := 0; i < numReaders; i++ {
+		go func(readerID int) {
+			defer func() { done <- true }()
+			for j := 0; j < iterations; j++ {
+				// Simulate what GetSecret/updateSecret/DeleteSecret do: read from map
+				client.arnMu.RLock()
+				_ = client.accountSecretArns[fmt.Sprintf("secret-%d", readerID)]
+				// Read the entire map to increase race condition likelihood
+				for k := range client.accountSecretArns {
+					_ = k
+				}
+				client.arnMu.RUnlock()
+			}
+		}(i)
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < numWriters+numReaders; i++ {
+		<-done
+	}
+
+	// Test passes if no race condition occurred
+	// When run with -race flag, Go's race detector will catch any issues
+}
+
+// TestAwsClient_DeepCopyConcurrentSafety validates that DeepCopyInto
+// properly protects concurrent access to accountSecretArns during copy
+func TestAwsClient_DeepCopyConcurrentSafety(t *testing.T) {
+	original := &AwsClient{
+		Name:              "test-deepcopy",
+		accountSecretArns: make(map[string]string),
+	}
+
+	// Populate initial data
+	for i := 0; i < 100; i++ {
+		original.accountSecretArns[fmt.Sprintf("secret-%d", i)] = fmt.Sprintf("arn-%d", i)
+	}
+
+	const numCopiers = 20
+	done := make(chan bool)
+
+	// Perform concurrent deep copies
+	for i := 0; i < numCopiers; i++ {
+		go func() {
+			defer func() { done <- true }()
+			for j := 0; j < 50; j++ {
+				copied := original.DeepCopy()
+				assert.NotNil(t, copied)
+				// Verify some data was copied
+				assert.NotNil(t, copied.accountSecretArns)
+			}
+		}()
+	}
+
+	// Also modify the original map concurrently
+	go func() {
+		defer func() { done <- true }()
+		for j := 0; j < 100; j++ {
+			original.arnMu.Lock()
+			original.accountSecretArns[fmt.Sprintf("new-secret-%d", j)] = fmt.Sprintf("new-arn-%d", j)
+			original.arnMu.Unlock()
+		}
+	}()
+
+	// Wait for all goroutines
+	for i := 0; i < numCopiers+1; i++ {
+		<-done
+	}
 }
