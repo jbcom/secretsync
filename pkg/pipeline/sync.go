@@ -13,7 +13,12 @@ import (
 )
 
 // syncTarget executes sync operations for a single target.
-// Each sync is a distinct, idempotent operation: read from merge store, write to AWS.
+//
+// Sync reads from the merge store bundle (created by merge phase) and writes to AWS.
+// The bundle path is deterministic based on the source sequence used during merge,
+// so sync always knows where to find the merged secrets.
+//
+// Flow: MergeStore[bundle_path] → AWS[target_account]
 func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun bool) Result {
 	start := time.Now()
 	l := log.WithFields(log.Fields{
@@ -33,96 +38,39 @@ func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun boo
 		}
 	}
 
-	// Determine source (merge store) path
-	var mergePath string
-	if p.config.MergeStore.Vault != nil {
-		mergePath = fmt.Sprintf("%s/%s", p.config.MergeStore.Vault.Mount, targetName)
-	} else if p.s3Store != nil {
-		mergePath = p.s3Store.GetMergePath(targetName)
-	} else {
+	// Get the deterministic bundle path (same calculation as merge phase)
+	bundlePath, err := p.GetBundlePath(targetName)
+	if err != nil {
 		return Result{
 			Target:   targetName,
 			Phase:    "sync",
 			Success:  false,
-			Error:    fmt.Errorf("no merge store configured"),
+			Error:    fmt.Errorf("failed to get bundle path: %w", err),
 			Duration: time.Since(start),
 		}
 	}
 
 	l.WithFields(log.Fields{
-		"mergePath": mergePath,
-		"accountId": target.AccountID,
-	}).Info("Starting sync")
+		"bundlePath": bundlePath,
+		"accountId":  target.AccountID,
+	}).Info("Starting sync from merge store bundle")
 
-	// Initialize source client (merge store)
-	var secrets []string
-	var secretsData map[string]map[string]interface{}
-
-	if p.config.MergeStore.Vault != nil {
-		mergeClient := &vault.VaultClient{
-			Address:   p.config.Vault.Address,
-			Namespace: p.config.Vault.Namespace,
-		}
-		if err := mergeClient.Init(ctx); err != nil {
-			return Result{
-				Target:   targetName,
-				Phase:    "sync",
-				Success:  false,
-				Error:    fmt.Errorf("failed to init merge vault client: %w", err),
-				Duration: time.Since(start),
-			}
-		}
-
-		var err error
-		secrets, err = mergeClient.ListSecrets(ctx, mergePath)
-		if err != nil {
-			return Result{
-				Target:   targetName,
-				Phase:    "sync",
-				Success:  false,
-				Error:    fmt.Errorf("failed to list secrets from merge store: %w", err),
-				Duration: time.Since(start),
-			}
-		}
-
-		// Read all secret data
-		secretsData = make(map[string]map[string]interface{})
-		for _, secretPath := range secrets {
-			data, err := mergeClient.GetKVSecretOnce(ctx, secretPath)
-			if err != nil {
-				l.WithError(err).WithField("secret", secretPath).Warn("Failed to read secret from merge store")
-				continue
-			}
-			secretsData[secretPath] = data
-		}
-	} else if p.s3Store != nil {
-		var err error
-		secrets, err = p.s3Store.ListSecrets(ctx, targetName)
-		if err != nil {
-			return Result{
-				Target:   targetName,
-				Phase:    "sync",
-				Success:  false,
-				Error:    fmt.Errorf("failed to list secrets from S3 merge store: %w", err),
-				Duration: time.Since(start),
-			}
-		}
-
-		secretsData = make(map[string]map[string]interface{})
-		for _, secretPath := range secrets {
-			data, err := p.s3Store.ReadSecret(ctx, targetName, secretPath)
-			if err != nil {
-				l.WithError(err).WithField("secret", secretPath).Warn("Failed to read secret from S3")
-				continue
-			}
-			secretsData[secretPath] = data
+	// Read all secrets from the bundle
+	secretsData, err := p.readBundleSecrets(ctx, targetName, bundlePath)
+	if err != nil {
+		return Result{
+			Target:   targetName,
+			Phase:    "sync",
+			Success:  false,
+			Error:    fmt.Errorf("failed to read bundle: %w", err),
+			Duration: time.Since(start),
 		}
 	}
 
-	l.WithField("secretsCount", len(secrets)).Debug("Retrieved secrets from merge store")
+	l.WithField("secretsCount", len(secretsData)).Debug("Retrieved secrets from bundle")
 
 	if dryRun {
-		l.WithField("secretsCount", len(secrets)).Info("[DRY-RUN] Would sync secrets to AWS")
+		l.WithField("secretsCount", len(secretsData)).Info("[DRY-RUN] Would sync secrets to AWS")
 		return Result{
 			Target:    targetName,
 			Phase:     "sync",
@@ -130,8 +78,8 @@ func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun boo
 			Success:   true,
 			Duration:  time.Since(start),
 			Details: ResultDetails{
-				SecretsProcessed: len(secrets),
-				SourcePaths:      []string{mergePath},
+				SecretsProcessed: len(secretsData),
+				SourcePaths:      []string{bundlePath},
 				DestinationPath:  fmt.Sprintf("aws://%s", target.AccountID),
 			},
 		}
@@ -216,7 +164,7 @@ func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun boo
 		Duration:  time.Since(start),
 		Details: ResultDetails{
 			SecretsProcessed: successCount,
-			SourcePaths:      []string{mergePath},
+			SourcePaths:      []string{bundlePath},
 			DestinationPath:  fmt.Sprintf("aws://%s", target.AccountID),
 			RoleARN:          roleARN,
 		},
@@ -234,6 +182,63 @@ func (p *Pipeline) syncTarget(ctx context.Context, targetName string, dryRun boo
 	}
 
 	return result
+}
+
+// readBundleSecrets reads all secrets from the merge store bundle
+func (p *Pipeline) readBundleSecrets(ctx context.Context, targetName, bundlePath string) (map[string]map[string]interface{}, error) {
+	secretsData := make(map[string]map[string]interface{})
+
+	if p.config.MergeStore.Vault != nil {
+		mergeClient := &vault.VaultClient{
+			Address:   p.config.Vault.Address,
+			Namespace: p.config.Vault.Namespace,
+		}
+		if err := mergeClient.Init(ctx); err != nil {
+			return nil, fmt.Errorf("failed to init merge vault client: %w", err)
+		}
+
+		secrets, err := mergeClient.ListSecrets(ctx, bundlePath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list secrets from bundle: %w", err)
+		}
+
+		for _, secretPath := range secrets {
+			data, err := mergeClient.GetKVSecretOnce(ctx, secretPath)
+			if err != nil {
+				log.WithError(err).WithField("secret", secretPath).Warn("Failed to read secret from bundle")
+				continue
+			}
+			// Use relative path within bundle
+			relPath := secretPath
+			if len(secretPath) > len(bundlePath) {
+				relPath = secretPath[len(bundlePath):]
+				if len(relPath) > 0 && relPath[0] == '/' {
+					relPath = relPath[1:]
+				}
+			}
+			secretsData[relPath] = data
+		}
+	} else if p.s3Store != nil {
+		target, ok := p.config.Targets[targetName]
+		if !ok {
+			return nil, fmt.Errorf("target not found: %s", targetName)
+		}
+
+		var sourcePaths []string
+		for _, importName := range target.Imports {
+			sourcePath := p.config.GetSourcePath(importName)
+			sourcePaths = append(sourcePaths, sourcePath)
+		}
+		bundleID := BundleID(sourcePaths)
+
+		data, err := p.s3Store.ReadMergedBundle(ctx, targetName, bundleID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read bundle from S3: %w", err)
+		}
+		secretsData = data
+	}
+
+	return secretsData, nil
 }
 
 // getAWSClientForTarget returns an AWS client configured for the target account.
