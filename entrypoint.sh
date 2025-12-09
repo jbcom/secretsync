@@ -5,58 +5,59 @@
 
 set -e
 
-# Build command from environment variables
-CMD="secretsync pipeline"
+# Build argument list safely (no eval, no command injection)
+ARGS="pipeline"
 
 # Config file (required)
 CONFIG="${SECRETSYNC_CONFIG:-config.yaml}"
-CMD="$CMD --config \"$CONFIG\""
+ARGS="$ARGS --config $CONFIG"
 
 # Optional: specific targets
 if [ -n "$SECRETSYNC_TARGETS" ]; then
-    CMD="$CMD --targets \"$SECRETSYNC_TARGETS\""
+    ARGS="$ARGS --targets $SECRETSYNC_TARGETS"
 fi
 
 # Boolean flags
 if [ "$SECRETSYNC_DRY_RUN" = "true" ]; then
-    CMD="$CMD --dry-run"
+    ARGS="$ARGS --dry-run"
 fi
 
 if [ "$SECRETSYNC_MERGE_ONLY" = "true" ]; then
-    CMD="$CMD --merge-only"
+    ARGS="$ARGS --merge-only"
 fi
 
 if [ "$SECRETSYNC_SYNC_ONLY" = "true" ]; then
-    CMD="$CMD --sync-only"
+    ARGS="$ARGS --sync-only"
 fi
 
 if [ "$SECRETSYNC_DISCOVER" = "true" ]; then
-    CMD="$CMD --discover"
+    ARGS="$ARGS --discover"
 fi
 
 if [ "$SECRETSYNC_DIFF" = "true" ]; then
-    CMD="$CMD --diff"
+    ARGS="$ARGS --diff"
 fi
 
 if [ "$SECRETSYNC_EXIT_CODE" = "true" ]; then
-    CMD="$CMD --exit-code"
+    ARGS="$ARGS --exit-code"
 fi
 
 # Output format (default: github for Actions, human otherwise)
 OUTPUT="${SECRETSYNC_OUTPUT:-github}"
-CMD="$CMD --output \"$OUTPUT\""
+ARGS="$ARGS --output $OUTPUT"
 
 # Logging
 LOG_LEVEL="${SECRETSYNC_LOG_LEVEL:-info}"
-CMD="$CMD --log-level \"$LOG_LEVEL\""
+ARGS="$ARGS --log-level $LOG_LEVEL"
 
 LOG_FORMAT="${SECRETSYNC_LOG_FORMAT:-text}"
-CMD="$CMD --log-format \"$LOG_FORMAT\""
+ARGS="$ARGS --log-format $LOG_FORMAT"
 
 # Debug mode - print command
 if [ "$LOG_LEVEL" = "debug" ] || [ "$SECRETSYNC_DEBUG" = "true" ]; then
-    echo "Executing: $CMD"
+    echo "Executing: secretsync $ARGS"
 fi
 
-# Execute
-eval exec $CMD
+# Execute directly without eval to prevent command injection
+# shellcheck disable=SC2086
+exec secretsync $ARGS
