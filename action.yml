@@ -4,6 +4,9 @@ author: "jbcom"
 description: "Sync secrets from HashiCorp Vault to AWS Secrets Manager across multiple accounts"
 runs:
   using: "docker"
+  # TODO: Once v1 image is published, use immutable digest format:
+  # image: "docker://jbcom/secretsync:v1@sha256:<digest>"
+  # This ensures reproducibility and security by pinning to exact image content
   image: "docker://jbcom/secretsync:v1" # x-release-please-version
 branding:
   icon: "lock"
