@@ -583,11 +583,8 @@ func (g *AwsClient) ListSecrets(ctx context.Context, p string) ([]string, error)
 			l.Debugf("error: %v", err)
 			return nil, circuitbreaker.WrapError(err, g.breaker.Name(), g.breaker.State())
 		}
-<<<<<<< HEAD
-		
-=======
+
 		pageCount++
->>>>>>> e135da7 (Add observability metrics for Vault, AWS, and pipeline operations)
 		for _, secret := range resp.SecretList {
 			secretName := *secret.Name
 

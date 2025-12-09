@@ -291,12 +291,8 @@ func (vc *VaultClient) GetKVSecretOnce(ctx context.Context, s string) (map[strin
 		return c.ReadWithContext(ctx, s)
 	})
 	if err != nil {
-<<<<<<< HEAD
-		return secrets, circuitbreaker.WrapError(err, vc.breaker.Name(), vc.breaker.State())
-=======
 		observability.RecordError(observability.VaultErrors, "get_secret", "api_error")
-		return secrets, err
->>>>>>> e135da7 (Add observability metrics for Vault, AWS, and pipeline operations)
+		return secrets, circuitbreaker.WrapError(err, vc.breaker.Name(), vc.breaker.State())
 	}
 	
 	secret := result
