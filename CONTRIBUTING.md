@@ -103,7 +103,13 @@ golangci-lint run
 
 # Build
 go build ./...
+
+# Build documentation (optional)
+cd docs
+uv run sphinx-build -b html . _build/html
 ```
+
+**Note:** Documentation is automatically built and deployed to GitHub Pages when a version tag is pushed (during the release process).
 
 #### Submitting Changes
 
@@ -277,6 +283,10 @@ Releases are managed by maintainers:
 1. Update CHANGELOG.md
 2. Create version tag
 3. Push tag to trigger CI/CD
+   - Docker images are built and pushed
+   - Helm charts are released
+   - GitHub release is created
+   - Documentation is deployed to GitHub Pages
 4. Verify release artifacts
 5. Update Marketplace (if applicable)
 

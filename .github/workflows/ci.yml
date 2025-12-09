@@ -230,6 +230,63 @@ jobs:
           helm push secretsync-${{ steps.version.outputs.version }}.tgz ${{ env.HELM_REGISTRY }}
 
   # ============================================
+  # DOCS (tags only - deploy to GitHub Pages)
+  # ============================================
+  docs:
+    name: Build & Deploy Docs
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [release]
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+
+    steps:
+      # actions/checkout v6.0.1
+      - name: Checkout
+        uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+
+      # actions/setup-python v6.0.0
+      - name: Setup Python
+        uses: actions/setup-python@42375524e23c412d93fb67b49958b491fce71c38
+        with:
+          python-version: "3.12"
+
+      # astral-sh/setup-uv v7.0.0
+      - name: Install uv
+        uses: astral-sh/setup-uv@1c1e5f51e8e4280bd2461c0b33c94de166c85564
+        with:
+          version: "latest"
+
+      - name: Install documentation dependencies
+        run: uv sync --extra docs
+
+      - name: Build documentation
+        run: |
+          cd docs
+          uv run sphinx-build -b html . _build/html
+
+      - name: Add .nojekyll
+        run: touch docs/_build/html/.nojekyll
+
+      # actions/configure-pages v5.0.1
+      - name: Setup Pages
+        uses: actions/configure-pages@4b6f0e59620c8e61da0342769ea16c08f0e24088
+
+      # actions/upload-pages-artifact v4.0.0
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@1f5713e06086f4259feed9feaf7e31dd9bfd370d
+        with:
+          path: 'docs/_build/html'
+
+      # actions/deploy-pages v4.1.1
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@4e9d5fca67df32fba6c0a63fb849c5e2010f2dc4
+
+  # ============================================
   # AUTO-RELEASE (main branch - semantic versioning)
   # ============================================
   auto-release:
