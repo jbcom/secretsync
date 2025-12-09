@@ -1,25 +1,7 @@
-# Go development environment for SecretSync
-# Go 1.24 - matches golangci-lint v2.7.2 build version
-FROM golang:1.24-bookworm
+# Go development environment for vault-secret-sync
+FROM golang:1.25.5-trixie
 
 WORKDIR /workspace
-
-# =============================================================================
-# SHELL CONFIGURATION
-# =============================================================================
-# dump_bash_state - dumps bash command history from an active shell process
-# Useful for debugging. See: https://www.commandlinefu.com/commands/view/11427
-# Requires gdb to be installed
-RUN echo 'dump_bash_state() { \
-  local pid="${1:-$$}"; \
-  local outfile="/tmp/bash_history-${pid}.txt"; \
-  if command -v gdb &>/dev/null; then \
-    gdb -batch --eval "attach $pid" --eval "call write_history(\"$outfile\")" --eval "detach" --eval "q" 2>/dev/null && \
-    echo "History dumped to $outfile"; \
-  else \
-    echo "gdb not installed - cannot dump bash state"; \
-  fi; \
-}' >> /etc/bash.bashrc
 
 # =============================================================================
 # SYSTEM DEPENDENCIES
@@ -32,19 +14,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gh \
     # Task automation
     just \
-    # Essential CLI tools
-    ripgrep \
-    jq \
-    curl \
-    wget \
-    # Debugging
-    gdb \
     && rm -rf /var/lib/apt/lists/*
 
 # =============================================================================
 # GOLANGCI-LINT
 # =============================================================================
-# Install latest golangci-lint
+# Install latest golangci-lint for Go 1.25 compatibility
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin latest && \
     golangci-lint --version
 
@@ -55,4 +30,4 @@ RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/i
 RUN git lfs install --system --skip-smudge
 
 # Verify installations
-RUN go version && golangci-lint --version && gh --version && rg --version && jq --version
+RUN go version && golangci-lint --version && gh --version
