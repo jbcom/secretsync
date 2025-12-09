@@ -1,4 +1,4 @@
-package awsidentitycenter
+package identitycenter
 
 import (
 	"context"

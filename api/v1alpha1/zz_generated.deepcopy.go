@@ -210,24 +210,8 @@ func (in *StoreConfig) DeepCopyInto(out *StoreConfig) {
 		in, out := &in.IdentityCenter, &out.IdentityCenter
 		*out = (*in).DeepCopy()
 	}
-	if in.Doppler != nil {
-		in, out := &in.Doppler, &out.Doppler
-		*out = (*in).DeepCopy()
-	}
-	if in.GCP != nil {
-		in, out := &in.GCP, &out.GCP
-		*out = (*in).DeepCopy()
-	}
-	if in.GitHub != nil {
-		in, out := &in.GitHub, &out.GitHub
-		*out = (*in).DeepCopy()
-	}
 	if in.Vault != nil {
 		in, out := &in.Vault, &out.Vault
-		*out = (*in).DeepCopy()
-	}
-	if in.HTTP != nil {
-		in, out := &in.HTTP, &out.HTTP
 		*out = (*in).DeepCopy()
 	}
 }
