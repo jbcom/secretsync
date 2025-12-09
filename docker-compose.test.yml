@@ -83,7 +83,7 @@ services:
 
   # Test runner service - runs integration tests after seeding
   test-runner:
-    image: golang:1.25.5
+    image: golang:1.25-bookworm
     container_name: secretsync-test-runner
     working_dir: /app
     volumes:
