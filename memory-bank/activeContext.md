@@ -65,7 +65,14 @@ helm upgrade --install vault-secret-sync deploy/charts/vault-secret-sync
 
 ### Active Milestones
 - **v1.1.0**: CI/Security/Observability focus
+  - Branch: `release/v1.1.0`
 - **v1.2.0**: FlipsideCrypto compatibility focus
+
+### Release Branch Created
+- `release/v1.1.0` created from main
+- All v1.1.0 issues linked to this branch
+- Feature work should branch from `release/v1.1.0`
+- PRs should target `release/v1.1.0`
 
 ---
 *Last updated: 2025-12-09*
