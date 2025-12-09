@@ -1,5 +1,5 @@
 name: 'SecretSync'
-description: 'Universal secrets synchronization pipeline for multi-cloud secret management with Vault, AWS, GCP, and more'
+description: 'Universal secrets synchronization pipeline for multi-cloud secret management with Vault and AWS'
 author: 'jbcom'
 
 branding:
