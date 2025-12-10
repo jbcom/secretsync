@@ -11,20 +11,7 @@
       },
       "disabled": false,
       "autoApprove": [
-        "search_code"
-      ]
-    },
-    "context7": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp@latest"
-      ],
-      "env": {},
-      "disabled": false,
-      "autoApprove": [
-        "resolve-library-id",
-        "get-library-docs"
+        "list_issues"
       ]
     }
   }
