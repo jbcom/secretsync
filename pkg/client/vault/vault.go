@@ -48,12 +48,12 @@ type VaultClient struct {
 	Role string `yaml:"role,omitempty" json:"role,omitempty"`
 
 	// Configurable traversal limits (0 = use defaults)
-	MaxTraversalDepth       int `yaml:"maxTraversalDepth,omitempty" json:"maxTraversalDepth,omitempty"`
-	MaxSecretsPerMount      int `yaml:"maxSecretsPerMount,omitempty" json:"maxSecretsPerMount,omitempty"`
+	MaxTraversalDepth        int `yaml:"maxTraversalDepth,omitempty" json:"maxTraversalDepth,omitempty"`
+	MaxSecretsPerMount       int `yaml:"maxSecretsPerMount,omitempty" json:"maxSecretsPerMount,omitempty"`
 	QueueCompactionThreshold int `yaml:"queueCompactionThreshold,omitempty" json:"queueCompactionThreshold,omitempty"`
 
-	Client        *api.Client              `yaml:"-" json:"-"`
-	logicalClient LogicalClient            `yaml:"-" json:"-"` // For dependency injection in tests
+	Client        *api.Client                    `yaml:"-" json:"-"`
+	logicalClient LogicalClient                  `yaml:"-" json:"-"` // For dependency injection in tests
 	breaker       *circuitbreaker.CircuitBreaker `yaml:"-" json:"-"` // Circuit breaker for API calls
 	breakerOnce   sync.Once                      `yaml:"-" json:"-"`
 }
@@ -64,6 +64,7 @@ func (in *VaultClient) DeepCopyInto(out *VaultClient) {
 		return
 	}
 
+	// Copy scalar fields individually to avoid copying sync.Once lock
 	out.Path = in.Path
 	out.Address = in.Address
 	out.CIDR = in.CIDR
@@ -118,11 +119,11 @@ func NewClient(cfg *VaultClient) (*VaultClient, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Initialize circuit breaker for Vault API calls
 	breakerName := fmt.Sprintf("vault-%s", vc.Address)
 	vc.breaker = circuitbreaker.New(circuitbreaker.DefaultConfig(breakerName))
-	
+
 	l.Tracef("client=%+v", vc)
 	l.Trace("end")
 	return vc, nil
@@ -302,10 +303,10 @@ func (vc *VaultClient) GetKVSecretOnce(ctx context.Context, s string) (map[strin
 		observability.RecordError(observability.VaultErrors, "get_secret", "not_initialized")
 		return secrets, errors.New("vault client not initialized")
 	}
-	
+
 	// Ensure circuit breaker is initialized
 	vc.ensureBreaker()
-	
+
 	// Wrap Vault API call with circuit breaker
 	result, err := circuitbreaker.ExecuteTyped(vc.breaker, ctx, func(ctx context.Context) (*api.Secret, error) {
 		return c.ReadWithContext(ctx, s)
@@ -314,7 +315,7 @@ func (vc *VaultClient) GetKVSecretOnce(ctx context.Context, s string) (map[strin
 		observability.RecordError(observability.VaultErrors, "get_secret", "api_error")
 		return secrets, circuitbreaker.WrapError(err, vc.breaker.Name(), vc.breaker.State())
 	}
-	
+
 	secret := result
 	if secret == nil || secret.Data == nil {
 		observability.RecordError(observability.VaultErrors, "get_secret", "not_found")
@@ -463,7 +464,7 @@ func (vc *VaultClient) WriteSecretOnce(ctx context.Context, p string, s map[stri
 
 	// Ensure circuit breaker is initialized
 	vc.ensureBreaker()
-	
+
 	// Wrap Vault API call with circuit breaker
 	_, err := circuitbreaker.ExecuteTyped(vc.breaker, ctx, func(ctx context.Context) (*api.Secret, error) {
 		return vc.Client.Logical().WriteWithContext(ctx, p, vd)
@@ -492,7 +493,7 @@ func (vc *VaultClient) WriteSecretWithLatestCAS(ctx context.Context, p string, s
 
 	// Ensure circuit breaker is initialized
 	vc.ensureBreaker()
-	
+
 	metadata, err := circuitbreaker.ExecuteTyped(vc.breaker, ctx, func(ctx context.Context) (*api.Secret, error) {
 		return vc.Client.Logical().ReadWithContext(ctx, metadataPathStr)
 	})
@@ -552,10 +553,10 @@ func (vc *VaultClient) DeleteSecret(ctx context.Context, p string) error {
 	if terr != nil {
 		return terr
 	}
-	
+
 	// Ensure circuit breaker is initialized
 	vc.ensureBreaker()
-	
+
 	// Wrap Vault API call with circuit breaker
 	_, err := circuitbreaker.ExecuteTyped(vc.breaker, ctx, func(ctx context.Context) (*api.Secret, error) {
 		return vc.Client.Logical().DeleteWithContext(ctx, p)
@@ -827,10 +828,10 @@ func (vc *VaultClient) listPathContents(ctx context.Context, metadataPath string
 	if logical == nil {
 		return nil, errors.New("vault client not initialized")
 	}
-	
+
 	// Ensure circuit breaker is initialized
 	vc.ensureBreaker()
-	
+
 	// Wrap Vault API call with circuit breaker
 	result, err := circuitbreaker.ExecuteTyped(vc.breaker, ctx, func(ctx context.Context) (*api.Secret, error) {
 		return logical.ListWithContext(ctx, metadataPath)
@@ -838,7 +839,7 @@ func (vc *VaultClient) listPathContents(ctx context.Context, metadataPath string
 	if err != nil {
 		return nil, circuitbreaker.WrapError(err, vc.breaker.Name(), vc.breaker.State())
 	}
-	
+
 	secret := result
 	if secret == nil {
 		return nil, nil
@@ -846,13 +847,13 @@ func (vc *VaultClient) listPathContents(ctx context.Context, metadataPath string
 	if secret.Data == nil || secret.Data["keys"] == nil {
 		return nil, nil
 	}
-	
+
 	// Type-safe extraction of keys
 	keysInterface, ok := secret.Data["keys"].([]interface{})
 	if !ok {
 		return nil, fmt.Errorf("unexpected keys type in Vault response: %T", secret.Data["keys"])
 	}
-	
+
 	var keys []string
 	for i, v := range keysInterface {
 		keyStr, ok := v.(string)

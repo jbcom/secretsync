@@ -14,8 +14,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/sony/gobreaker/v2"
 	log "github.com/sirupsen/logrus"
+	"github.com/sony/gobreaker/v2"
 )
 
 // Config holds circuit breaker configuration
@@ -185,11 +185,14 @@ func WrapError(err error, cbName string, state gobreaker.State) error {
 	if err == nil {
 		return nil
 	}
-	if errors.Is(err, gobreaker.ErrOpenState) {
+
+	// Use switch with errors.Is checks to satisfy staticcheck QF1003
+	switch {
+	case errors.Is(err, gobreaker.ErrOpenState):
 		return fmt.Errorf("circuit breaker %q is open (service degraded): %w", cbName, err)
-	}
-	if errors.Is(err, gobreaker.ErrTooManyRequests) {
+	case errors.Is(err, gobreaker.ErrTooManyRequests):
 		return fmt.Errorf("circuit breaker %q rejected request (too many requests in half-open state): %w", cbName, err)
+	default:
+		return err
 	}
-	return err
 }
